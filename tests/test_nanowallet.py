@@ -133,9 +133,16 @@ async def test_send(mock_block, mock_get_account_id, mock_generate_private_key, 
     mock_get_account_id.return_value = account
 
     mock_rpc.account_info.return_value = {
-        "frontier": "frontier_block",
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
         "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
-        "balance": "2000000000000000000000000000000"
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
     }
     mock_rpc.work_generate.return_value = {"work": "work_value"}
     mock_rpc.process.return_value = {"hash": "processed_block_hash"}
@@ -245,3 +252,35 @@ async def test_receive_by_hash(mock_block, mock_get_account_id, mock_generate_pr
     assert result.value == "processed_block_hash"
     mock_block.assert_called()
     mock_rpc.process.assert_called()
+
+
+def test_nano_to_raw():
+    # Test case with 0.00005 Nano
+    input_nano = "0.00005"
+    expected_raw = 50000000000000000000000000
+
+    result = nano_to_raw(input_nano)
+
+    assert result == expected_raw, f"Expected {expected_raw}, but got {result}"
+
+    # Additional test cases
+    assert nano_to_raw(
+        "1") == 1000000000000000000000000000000, "Failed for 1 Nano"
+    assert nano_to_raw(
+        "0.1") == 100000000000000000000000000000, "Failed for 0.1 Nano"
+    assert nano_to_raw(
+        "1.23456789") == 1234567890000000000000000000000, "Failed for 1.23456789 Nano"
+
+    # Test case for a very small amount
+    small_amount = "0.000000000000000000000000000001"
+    assert nano_to_raw(small_amount) == 1, "Failed for very small amount"
+
+    with pytest.raises(ValueError, match="Nano amount is negative"):
+        nano_to_raw("-1")
+    with pytest.raises(ValueError, match="Nano amount is negative"):
+        nano_to_raw("-0.0001")
+    with pytest.raises(ValueError, match="Nano amount is negative"):
+        nano_to_raw(
+            "-100000000000000000000000000000100000000000000000000000000000")
+    with pytest.raises(ValueError):
+        nano_to_raw("invalid_input")

@@ -2,13 +2,35 @@ from __future__ import annotations
 import functools
 from typing import TypeVar, Callable, Awaitable, Any, Dict, Generic
 from dataclasses import dataclass
+import logging
+# Configure logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 
-def nano_to_raw(nano_amount: float) -> int:
+def nano_to_raw(amount_nano: float) -> int:
     """
     Converts Nano amount to raw.
     """
-    return int(nano_amount * (10 ** 30))
+    if float(amount_nano) < 0:
+        raise ValueError("Nano amount is negative")
+
+    amount_nano = str(amount_nano)
+
+    if '.' in amount_nano:
+        whole, fraction = amount_nano.split('.')
+    else:
+        whole, fraction = amount_nano, ''
+
+    if len(fraction) > 30:
+        raise ValueError("Nano amount has more than 30 decimal places.")
+
+    whole = whole.lstrip('0') or '0'
+    fraction = fraction.ljust(30, '0')
+    raw_str = whole + fraction
+    raw_str = raw_str.lstrip('0') or '0'
+
+    return int(raw_str)
 
 
 def raw_to_nano(raw_amount: int) -> float:
@@ -62,7 +84,11 @@ def handle_errors(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[
             result = await func(self, *args, **kwargs)
             return NanoResult(value=result)
         except NanoException as e:
+            logger.error("NanoException in %s: %s",
+                         func.__name__, e.message, exc_info=True)
             return NanoResult(error=e.message, error_code=e.code)
         except Exception as e:
+            logger.error("Unexpected error in %s: %s",
+                         func.__name__, str(e), exc_info=True)
             return NanoResult(error=str(e), error_code="UNEXPECTED_ERROR")
     return wrapper
