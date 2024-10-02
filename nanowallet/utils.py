@@ -12,9 +12,6 @@ def nano_to_raw(nano_amount: float) -> int:
 
 
 def raw_to_nano(raw_amount: int) -> float:
-    """
-    Converts raw amount to Nano.
-    """
     return int(raw_amount) / (10 ** 30)
 
 

@@ -1,7 +1,7 @@
 # NanoWallet Library
 
 
-**nanowallet_py** is a Python library that provides an easy-to-use interface for interacting with Nano cryptocurrency nodes. This library allows you to manage your Nano account inside a wallet. It allows you to send and receive transactions, and interact with the Nano network using the `NanoRpcTyped` client.
+**nanowallet_py** is a Python library that provides an easy-to-use interface for interacting with Nano nodes. This library allows you to manage your Nano account inside a wallet. It allows you to send and receive transactions, and interact with the Nano network using the `NanoRpcTyped` client.
 
 ## Installation
 

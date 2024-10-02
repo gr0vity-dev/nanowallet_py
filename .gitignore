@@ -1,4 +1,5 @@
 build/
+dist/
 nanowallet.egg-info
 venv/
 debug.py

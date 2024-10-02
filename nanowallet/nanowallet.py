@@ -36,13 +36,13 @@ class NanoWallet:
         self.weight_raw = 0
         self.receivable_balance = 0
         self.receivable_balance_raw = 0
+        self.confirmation_height = 0
+        self.block_count = 0
 
         self.frontier_block = None
         self.representative_block = None
         self.representative = None
         self.open_block = None
-        self.confirmation_height = None
-        self.block_count = None
 
         self.receivable_blocks = []
 
@@ -63,16 +63,19 @@ class NanoWallet:
 
     @handle_errors
     async def reload(self):
-        receivables = await self.rpc.receivable(self.account, source=True)
+        receivables = await self.rpc.receivable(self.account, source=True, threshold=1)
         self.receivable_blocks = receivables["blocks"]
         account_info = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
 
         if account_not_found(account_info) and self.receivable_blocks:
             # new account with receivables blocks
-            for block_hash in self.receivable_blocks:
-                block_info = await self._block_info(block_hash)
-                self.receivable_balance_raw += int(block_info["amount"])
+            print(self.receivable_blocks)
+            for _, amount in self.receivable_blocks.items():
+                self.receivable_balance_raw += int(amount)
+
             self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
+            print("receivable_balance", self.receivable_balance)
+            print("receivable_balance_raw", self.receivable_balance_raw)
 
         if not account_not_found(account_info):
             self.balance = raw_to_nano(account_info["balance"])
@@ -126,11 +129,22 @@ class NanoWallet:
         block.work = work
 
         response = await self.rpc.process(block.json())
-        return response
+        return response["hash"]
+
+    async def send_raw(self, destination_account, amount_raw: int) -> str:
+        """
+        Sends Nano to a destination account.
+
+        :param destination_account: The destination account ID.
+        :param amount_raw: The amount in raw.
+        :return: The hash of the sent block.
+        """
+        amount = raw_to_nano(amount_raw)
+        return self.send(destination_account, amount)
 
     @handle_errors
     @reload_after
-    async def sweep(self, destination_account: str, sweep_pending=True, threshold=None) -> str:
+    async def sweep(self, destination_account: str, sweep_pending=True, threshold_raw=None) -> str:
         """
         Transfers all funds from the current account to the destination account.
 
@@ -141,7 +155,7 @@ class NanoWallet:
             raise ValueError("Invalid destination account ID.")
 
         if sweep_pending:
-            await self.receive_all(threshold=threshold)
+            await self.receive_all(threshold_raw=threshold_raw)
 
         account_info = await self.rpc.account_info(self.account, representative=True)
         if account_not_found(account_info) or zero_balance(account_info):
@@ -164,17 +178,34 @@ class NanoWallet:
         return response['hash']
 
     @handle_errors
-    async def list_receivables(self, threshold: float = None) -> list:
+    async def list_receivables(self, threshold_raw: int = None) -> list:
         """
         Lists receivable blocks sorted by descending amount.
-
-        :param threshold: Minimum amount to consider (in Nano).
+        :param threshold_raw: Minimum amount to consider (in raw).
         :return: A list of receivable blocks.
         """
-
         await self.has_balance()
 
-        return sorted(self.receivable_blocks.items(), key=lambda x: int(x[1]['amount']), reverse=True)
+        # If receivable_blocks is empty, return an empty list
+        if not self.receivable_blocks:
+            return []
+
+        # Filter blocks based on threshold if provided
+        filtered_blocks = self.receivable_blocks.items()
+        if threshold_raw is not None:
+            filtered_blocks = [
+                (block, data) for block, data in filtered_blocks
+                if int(data['amount']) >= threshold_raw
+            ]
+
+        # Sort the filtered blocks by descending amount
+        sorted_receivables = sorted(
+            filtered_blocks,
+            key=lambda x: int(x[1]['amount']),
+            reverse=True
+        )
+
+        return sorted_receivables
 
     @handle_errors
     @reload_after
@@ -219,12 +250,12 @@ class NanoWallet:
         return response['hash']
 
     @handle_errors
-    async def receive_all(self, threshold: float = None) -> list:
+    async def receive_all(self, threshold_raw: float = None) -> list:
         """
         Receives all pending receivable blocks.
         """
         block_hashes = []
-        response = await self.list_receivables(threshold=threshold)
+        response = await self.list_receivables(threshold_raw=threshold_raw)
         for receivable in response.value:
             response = await self.receive_by_hash(receivable[0])
             if response.success:
@@ -232,13 +263,6 @@ class NanoWallet:
             else:
                 raise ValueError()
         return block_hashes
-
-    # async def refund_descending(self) -> None:
-    #     """
-    #     Refunds the latest payers block by block until no more funds are available.
-    #     """
-
-    #     # Implementation here...
 
     @handle_errors
     async def refund_first_sender(self) -> str:
@@ -255,16 +279,17 @@ class NanoWallet:
 
         return await self.sweep(refund_account)
 
-        # Implementation here...
-
-    # async def refund_proportional(self) -> None:
-    #     """
-    #     Refunds remaining funds proportional to the contributions.
-    #     """
-    #     # Implementation here...
-
     @handle_errors
     async def has_balance(self) -> bool:
+        """
+        Returns true if account has either available balance, receivable balance or both 
+        """
         await self.reload()
         if (self.balance_raw and self.balance_raw > 0) or (self.receivable_balance and self.receivable_balance > 0):
             return True
+
+    def raw_to_nano(self, amount_raw) -> int:
+        """
+        Converts raw amount to Nano.
+        """
+        return raw_to_nano(amount_raw)
