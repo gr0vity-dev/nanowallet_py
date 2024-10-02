@@ -1,0 +1,6 @@
+build/
+nanowallet.egg-info
+venv/
+debug.py
+_manage/
+**__pycache__**
