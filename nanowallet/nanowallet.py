@@ -68,7 +68,7 @@ class NanoWallet:
 
     @handle_errors
     async def reload(self):
-        receivables = await self.rpc.receivable(self.account, source=True, threshold=1)
+        receivables = await self.rpc.receivable(self.account, threshold=1)
         self.receivable_blocks = receivables["blocks"]
         account_info = await self._account_info()
 
