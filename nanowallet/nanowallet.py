@@ -1,7 +1,7 @@
 # nano_wallet_lib/nanowallet.py
 from __future__ import annotations
 from nanorpc.client import NanoRpcTyped
-from .rpc_errors import account_not_found, zero_balance
+from .rpc_errors import account_not_found, zero_balance, block_not_found
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id
 
@@ -50,7 +50,9 @@ class NanoWallet:
         return await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
 
     async def _block_info(self, block_hash: str) -> str:
-        block_info = await self.rpc.blocks_info([block_hash], source=True)
+        block_info = await self.rpc.blocks_info([block_hash], source=True, json_block=True)
+        if block_not_found(block_info):
+            raise ValueError(f"Block not found: {block_hash}")
         return block_info['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
@@ -104,33 +106,6 @@ class NanoWallet:
         if not validate_account_id(destination_account):
             raise ValueError("Invalid destination account ID.")
 
-        # raw_amount = nano_to_raw(amount)
-        # account_info = await self._account_info()
-
-        # previous = account_info["frontier"]
-        # representative = account_info["representative"]
-        # balance = int(account_info["balance"])
-
-        # new_balance = balance - raw_amount
-        # if new_balance < 0:
-        #     msg = f"Insufficient funds! Balance:{balance} amount:{raw_amount}"
-        #     raise ValueError(msg)
-
-        # block = Block(
-        #     block_type='state',
-        #     account=self.account,
-        #     previous=previous,
-        #     representative=representative,
-        #     balance=new_balance,
-        #     link_as_account=destination_account
-        # )
-        # Block.sign(block, self.private_key)
-
-        # work = await self._generate_work(block.work_block_hash)
-        # block.work = work
-
-        # response = await self.rpc.process(block.json())
-        # return response["hash"]
         amount_raw = nano_to_raw(amount)
 
         account_info = await self._account_info()
@@ -229,14 +204,14 @@ class NanoWallet:
         filtered_blocks = self.receivable_blocks.items()
         if threshold_raw is not None:
             filtered_blocks = [
-                (block, data) for block, data in filtered_blocks
-                if int(data['amount']) >= threshold_raw
+                (block, amount) for block, amount in filtered_blocks
+                if int(amount) >= threshold_raw
             ]
 
         # Sort the filtered blocks by descending amount
         sorted_receivables = sorted(
             filtered_blocks,
-            key=lambda x: int(x[1]['amount']),
+            key=lambda x: int(x[1]),
             reverse=True
         )
 
@@ -251,7 +226,7 @@ class NanoWallet:
         :param block_hash: The hash of the block to receive.
         :return: The hash of the received block.
         """
-        block_info = await self.rpc.block_info(block_hash)
+        block_info = await self._block_info(block_hash)
         amount_raw = int(block_info['amount'])
 
         account_info = await self._account_info()
@@ -296,7 +271,7 @@ class NanoWallet:
             if response.success:
                 block_hashes.append(response.value)
             else:
-                raise ValueError()
+                raise ValueError(response.error)
         return block_hashes
 
     @handle_errors

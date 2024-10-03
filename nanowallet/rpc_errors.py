@@ -11,3 +11,10 @@ def zero_balance(response):
         if response['balance'] == '0':
             return True
     return False
+
+
+def block_not_found(response):
+    if 'error' in response:
+        if response['error'] == 'Block not found':
+            return True
+    return False

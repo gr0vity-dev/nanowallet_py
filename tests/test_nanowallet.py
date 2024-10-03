@@ -262,8 +262,8 @@ async def test_list_receivables(mock_get_account_id, mock_generate_private_key, 
 
     mock_rpc.receivable.return_value = {
         "blocks": {
-            "block1": {"amount": "2000000000000000000000000000000"},
-            "block2": {"amount": "1000000000000000000000000000000"}
+            "block1": "2000000000000000000000000000000",
+            "block2": "1000000000000000000000000000000"
         }
     }
 
@@ -272,8 +272,8 @@ async def test_list_receivables(mock_get_account_id, mock_generate_private_key, 
     result = await wallet.list_receivables()
 
     expected = [
-        ('block1', {'amount': '2000000000000000000000000000000'}),
-        ('block2', {'amount': '1000000000000000000000000000000'})
+        ('block1', '2000000000000000000000000000000'),
+        ('block2', '1000000000000000000000000000000')
     ]
     assert result.success == True
     assert result.value == expected
@@ -308,8 +308,8 @@ async def test_list_receivables_threshold(mock_get_account_id, mock_generate_pri
 
     mock_rpc.receivable.return_value = {
         "blocks": {
-            "block1": {"amount": "2000000000000000000000000000000"},
-            "block2": {"amount": "1000000000000000000000000000000"}
+            "block1": "2000000000000000000000000000000",
+            "block2": "1000000000000000000000000000000"
         }
     }
 
@@ -318,7 +318,7 @@ async def test_list_receivables_threshold(mock_get_account_id, mock_generate_pri
     result = await wallet.list_receivables(threshold_raw=1000000000000000000000000000001)
 
     expected = [
-        ('block1', {'amount': '2000000000000000000000000000000'}),
+        ('block1', '2000000000000000000000000000000'),
     ]
     assert result.success == True
     assert result.value == expected
@@ -381,3 +381,71 @@ def test_nano_to_raw():
             "-100000000000000000000000000000100000000000000000000000000000")
     with pytest.raises(ValueError):
         nano_to_raw("invalid_input")
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
+async def test_receive_all(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    # Mock the RPC calls
+    mock_rpc.receivable.return_value = {
+        "blocks": {
+            "763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4": "500000000000000000000000000"
+        }
+    }
+    mock_rpc.blocks_info.return_value = {
+        "blocks": {
+            "763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4": {
+                "block_account": "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o",
+                "amount": "500000000000000000000000000"
+            }
+        }
+    }
+
+    mock_rpc.account_info.return_value = {
+        "error": "Account not found"
+    }
+    mock_rpc.work_generate.return_value = {"work": "3134dc9344d96938"}
+    mock_rpc.process.return_value = {
+        "hash": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79"}
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.receive_all()
+
+    assert result.success == True
+
+    assert result.value == [
+        "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79"]
+    assert mock_rpc.receivable.call_count == 2
+    assert mock_rpc.blocks_info.call_count == 1
+    assert mock_rpc.account_info.call_count == 3
+    assert mock_rpc.work_generate.call_count == 1
+    assert mock_rpc.process.call_count == 1
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
+async def test_receive_all_not_found(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    # Mock the RPC calls
+    mock_rpc.receivable.return_value = {
+        "blocks": {
+            "763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4": "500000000000000000000000000"
+        }
+    }
+
+    mock_rpc.blocks_info.return_value = {
+        "error": "Block not found"
+    }
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.receive_all()
+
+    assert result.success == False
+    assert result.error == "Block not found: 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
