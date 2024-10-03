@@ -127,6 +127,103 @@ async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, m
 @pytest.mark.asyncio
 @patch('nanowallet.nanowallet.generate_account_private_key')
 @patch('nanowallet.nanowallet.get_account_id')
+async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    mock_rpc.receivable.return_value = {
+        "blocks": {
+            "b1": "1000000000000000000000000000123"}
+    }
+    mock_rpc.account_info.return_value = {
+        "error": "Account not found"
+    }
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    await wallet.reload()
+    await wallet.reload()
+
+    assert wallet.receivable_balance_raw == 1000000000000000000000000000123
+    assert wallet.receivable_blocks == {
+        "b1": "1000000000000000000000000000123"}
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
+async def test_reload_unopen_no_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    mock_rpc.receivable.return_value = {
+        "blocks": ""
+    }
+    mock_rpc.account_info.return_value = {
+        "error": "Account not found"
+    }
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    await wallet.reload()
+
+    assert wallet.balance == 0
+    assert wallet.balance_raw == 0
+    assert wallet.frontier_block == None
+    assert wallet.representative_block == None
+    assert wallet.representative == None
+    assert wallet.open_block == None
+    assert wallet.confirmation_height == 0
+    assert wallet.block_count == 0
+    assert wallet.weight == 0
+    assert wallet.weight_raw == 0
+    assert wallet.receivable_balance == 0
+    assert wallet.receivable_balance_raw == 0
+    assert wallet.receivable_blocks == ""
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
+async def test_reload_no_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    mock_rpc.receivable.return_value = {
+        "blocks": ""
+    }
+    mock_rpc.account_info.return_value = {
+        "frontier": "frontier_block",
+        "open_block": "open_block",
+        "representative_block": "representative_block",
+        "balance": "2000000000000000000000000000000",
+        "modified_timestamp": "1611868227",
+        "block_count": "50",
+        "account_version": "1",
+        "confirmation_height": "40",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
+    }
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    await wallet.reload()
+
+    assert wallet.balance == 2
+    assert wallet.balance_raw == 2000000000000000000000000000000
+    assert wallet.frontier_block == "frontier_block"
+    assert wallet.representative_block == "representative_block"
+    assert wallet.representative == "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf"
+    assert wallet.open_block == "open_block"
+    assert wallet.confirmation_height == 40
+    assert wallet.block_count == 50
+    assert wallet.weight == 3
+    assert wallet.weight_raw == 3000000000000000000000000000000
+    assert wallet.receivable_balance == 1
+    assert wallet.receivable_balance_raw == 1000000000000000000000000000000
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
 @patch('nanowallet.nanowallet.Block')
 async def test_send(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
     mock_generate_private_key.return_value = private_key

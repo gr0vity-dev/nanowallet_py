@@ -72,6 +72,7 @@ class NanoWallet:
 
         if account_not_found(account_info) and self.receivable_blocks:
             # new account with receivables blocks
+            self.receivable_balance_raw = 0
             for _, amount in self.receivable_blocks.items():
                 self.receivable_balance_raw += int(amount)
             self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
