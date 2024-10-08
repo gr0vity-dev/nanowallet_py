@@ -46,6 +46,21 @@ class NanoWallet:
 
         self.receivable_blocks = []
 
+    async def _build_block(self, previous, representative, balance, source_hash=None, destination_account=None):
+        block = Block(
+            block_type='state',
+            account=self.account,
+            previous=previous,
+            representative=representative,
+            balance=balance,
+            link=source_hash,
+            link_as_account=destination_account
+        )
+        Block.sign(block, self.private_key)
+        work = await self._generate_work(block.work_block_hash)
+        block.work = work
+        return block
+
     async def _account_info(self):
         return await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
 
@@ -120,18 +135,7 @@ class NanoWallet:
             msg = f"Insufficient funds! Balance:{balance} amount:{amount_raw}"
             raise ValueError(msg)
 
-        block = Block(
-            block_type='state',
-            account=self.account,
-            previous=account_info["frontier"],
-            representative=account_info["representative"],
-            balance=new_balance,
-            link_as_account=destination_account
-        )
-
-        Block.sign(block, self.private_key)
-        work = await self._generate_work(block.work_block_hash)
-        block.work = work
+        block = await self._build_block(account_info["frontier"], account_info["representative"], new_balance, destination_account=destination_account)
 
         response = await self.rpc.process(block.json())
         return response['hash']
@@ -163,7 +167,7 @@ class NanoWallet:
             raise ValueError("Invalid destination account ID.")
 
         if sweep_pending:
-            await self.receive_all(threshold_raw=threshold_raw)
+            result = await self.receive_all(threshold_raw=threshold_raw)
 
         account_info = await self._account_info()
         if account_not_found(account_info):
@@ -171,18 +175,7 @@ class NanoWallet:
         if zero_balance(account_info):
             raise ValueError("Unsufficient balance")
 
-        block = Block(
-            block_type='state',
-            account=self.account,
-            previous=account_info["frontier"],
-            representative=account_info["representative"],
-            balance=0,
-            link_as_account=destination_account
-        )
-
-        Block.sign(block, self.private_key)
-        work = await self._generate_work(block.work_block_hash)
-        block.work = work
+        block = await self._build_block(account_info["frontier"], account_info["representative"], 0, destination_account=destination_account)
 
         response = await self.rpc.process(block.json())
         return response['hash']
@@ -219,7 +212,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def receive_by_hash(self, block_hash: str) -> str:
+    async def receive_by_hash(self, block_hash: str) -> dict:
         """
         Receives a specific block by its hash.
 
@@ -242,39 +235,36 @@ class NanoWallet:
 
         new_balance = balance + amount_raw
 
-        block = Block(
-            block_type='state',
-            account=self.account,
-            previous=previous,
-            representative=representative,
-            balance=new_balance,
-            link=block_hash
-        )
-
-        Block.sign(block, self.private_key)
-
-        work = await self._generate_work(block.work_block_hash)
-        block.work = work
+        block = await self._build_block(previous, representative, new_balance, source_hash=block_hash)
 
         response = await self.rpc.process(block.json())
-        return response['hash']
 
-    @handle_errors
+        result = {
+            'hash': response['hash'],
+            'amount_raw': amount_raw,
+            'amount': raw_to_nano(amount_raw),
+            'source': block_info['source_account']
+        }
+
+        return result
+
+    @ handle_errors
     async def receive_all(self, threshold_raw: float = None) -> list:
         """
         Receives all pending receivable blocks.
         """
-        block_hashes = []
+        block_results = []
         response = await self.list_receivables(threshold_raw=threshold_raw)
+        print("list_receivables:", response)
         for receivable in response.value:
             response = await self.receive_by_hash(receivable[0])
             if response.success:
-                block_hashes.append(response.value)
+                block_results.append(response.value)
             else:
                 raise ValueError(response.error)
-        return block_hashes
+        return block_results
 
-    @handle_errors
+    @ handle_errors
     async def refund_first_sender(self) -> str:
         """
         Sends remaining funds to the account opener.
@@ -289,23 +279,53 @@ class NanoWallet:
 
         return await self.sweep(refund_account)
 
-    @handle_errors
+    @ handle_errors
     async def has_balance(self) -> bool:
         """
-        Returns true if account has either available balance, receivable balance or both 
+        Returns true if account has either available balance, receivable balance or both
         """
         await self.reload()
         if (self.balance_raw and self.balance_raw > 0) or (self.receivable_balance and self.receivable_balance > 0):
             return True
 
-    def raw_to_nano(self, amount_raw) -> float:
+    @ handle_errors
+    async def balance(self) -> dict:
+        """
+        Returns the balance and receivable balance in nano and raw amount
+        """
+        await self.reload()
+        return {
+            "balance": self.balance,
+            "balance_raw": self.balance_raw,
+            "receivable_balance": self.receivable_balance,
+            "receivable_balance_raw": self.receivable_balance_raw,
+        }
+
+
+class WalletUtils:
+
+    @staticmethod
+    def raw_to_nano(amount_raw) -> float:
         """
         Converts raw amount to Nano.
         """
         return raw_to_nano(amount_raw)
 
-    def nano_to_raw(self, amount_raw) -> int:
+    @staticmethod
+    def nano_to_raw(amount_raw) -> int:
         """
         Converts raw amount to Nano.
         """
         return nano_to_raw(amount_raw)
+
+    @staticmethod
+    def sum_received_amount(receive_all_response: list):
+        """
+        Sums the amount_raw values from a list of receivable responses.
+        """
+        total_amount_raw = sum(int(item['amount_raw'])
+                               for item in receive_all_response)
+        return {
+            "amount_raw": total_amount_raw,
+            "amount": raw_to_nano(total_amount_raw)
+        }
