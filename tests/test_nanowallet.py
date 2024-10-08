@@ -256,6 +256,68 @@ async def test_send(mock_block, mock_get_account_id, mock_generate_private_key, 
 @pytest.mark.asyncio
 @patch('nanowallet.nanowallet.generate_account_private_key')
 @patch('nanowallet.nanowallet.get_account_id')
+@patch('nanowallet.nanowallet.Block')
+async def test_send_raw(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    mock_rpc.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
+    }
+    mock_rpc.work_generate.return_value = {"work": "work_value"}
+    mock_rpc.process.return_value = {"hash": "processed_block_hash"}
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.send_raw("nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1e30)
+
+    assert result.success == True
+    assert result.value == "processed_block_hash"
+    mock_block.assert_called()
+    mock_rpc.process.assert_called()
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
+@patch('nanowallet.nanowallet.Block')
+async def test_send_raw_error(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
+    mock_generate_private_key.return_value = private_key
+    mock_get_account_id.return_value = account
+
+    mock_rpc.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
+    }
+    mock_rpc.work_generate.return_value = {"work": "work_value"}
+    mock_rpc.process.return_value = {"hash": "processed_block_hash"}
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.send_raw("nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1e30)
+
+    assert result.success == False
+    assert result.error == "Insufficient funds! balance_raw:2000 amount_raw:1000000000000000000000000000000"
+
+
+@pytest.mark.asyncio
+@patch('nanowallet.nanowallet.generate_account_private_key')
+@patch('nanowallet.nanowallet.get_account_id')
 async def test_list_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
     mock_generate_private_key.return_value = private_key
     mock_get_account_id.return_value = account

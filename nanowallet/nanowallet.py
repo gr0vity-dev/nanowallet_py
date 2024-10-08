@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error
-from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after
+from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id
 
 
@@ -132,7 +132,8 @@ class NanoWallet:
         balance = int(account_info["balance"])
         new_balance = balance - amount_raw
         if new_balance < 0:
-            msg = f"Insufficient funds! Balance:{balance} amount:{amount_raw}"
+            msg = f"""Insufficient funds! balance_raw:{
+                balance} amount_raw:{amount_raw}"""
             raise ValueError(msg)
 
         block = await self._build_block(
@@ -156,7 +157,7 @@ class NanoWallet:
         """
         amount = raw_to_nano(amount_raw)
         response = await self.send(destination_account, amount)
-        return response
+        return response.unwrap()
 
     @handle_errors
     @reload_after
@@ -274,13 +275,12 @@ class NanoWallet:
         """
         block_results = []
         response = await self.list_receivables(threshold_raw=threshold_raw)
-        print("list_receivables:", response)
-        for receivable in response.value:
-            response = await self.receive_by_hash(receivable[0])
-            if response.success:
-                block_results.append(response.value)
-            else:
-                raise ValueError(response.error)
+        receivables = response.unwrap()
+
+        for receivable in receivables:
+            response_2 = await self.receive_by_hash(receivable[0])
+            block_results.append(response_2.unwrap())
+
         return block_results
 
     @handle_errors

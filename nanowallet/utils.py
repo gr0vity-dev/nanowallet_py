@@ -69,6 +69,16 @@ class NanoResult():
     def __bool__(self) -> bool:
         return self.success
 
+    def unwrap(self) -> T:
+        """
+        Unwraps the NanoResult, returning the value if successful or raising an exception if there's an error.
+        :return: The value contained in the NanoResult.
+        :raises NanoException: If the NanoResult contains an error.
+        """
+        if self.error:
+            raise NanoException(self.error, self.error_code)
+        return self.value
+
 
 class NanoException(Exception):
     def __init__(self, message: str, code: str):
