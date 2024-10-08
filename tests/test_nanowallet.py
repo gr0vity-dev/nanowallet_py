@@ -1,8 +1,8 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from nanorpc.client import NanoRpcTyped
 from nanowallet.nanowallet import NanoWallet, WalletUtils
-from nanowallet.utils import nano_to_raw, raw_to_nano
+from nanowallet.utils import nano_to_raw, raw_to_nano, NanoResult
 
 
 @pytest.fixture
@@ -31,11 +31,7 @@ def mock_rpc():
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_init(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_init(mock_rpc, seed, index, account, private_key):
 
     wallet = NanoWallet(mock_rpc, seed, index)
 
@@ -46,11 +42,7 @@ async def test_init(mock_get_account_id, mock_generate_private_key, mock_rpc, se
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_reload(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_reload(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": {
@@ -89,11 +81,7 @@ async def test_reload(mock_get_account_id, mock_generate_private_key, mock_rpc, 
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_reload_unopened(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": {
@@ -125,11 +113,7 @@ async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, m
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_reload_unopened_2(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": {
@@ -149,11 +133,7 @@ async def test_reload_unopened(mock_get_account_id, mock_generate_private_key, m
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_reload_unopen_no_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_reload_unopen_no_receivables(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": ""
@@ -181,12 +161,7 @@ async def test_reload_unopen_no_receivables(mock_get_account_id, mock_generate_p
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_reload_no_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
-
+async def test_reload_no_receivables(mock_rpc, seed, index):
     mock_rpc.receivable.return_value = {
         "blocks": ""
     }
@@ -222,12 +197,8 @@ async def test_reload_no_receivables(mock_get_account_id, mock_generate_private_
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
 @patch('nanowallet.nanowallet.Block')
-async def test_send(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_send(mock_block, mock_rpc, seed, index):
 
     mock_rpc.account_info.return_value = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
@@ -254,12 +225,8 @@ async def test_send(mock_block, mock_get_account_id, mock_generate_private_key, 
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
 @patch('nanowallet.nanowallet.Block')
-async def test_send_raw(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_send_raw(mock_block, mock_rpc, seed, index, account, private_key):
 
     mock_rpc.account_info.return_value = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
@@ -286,12 +253,7 @@ async def test_send_raw(mock_block, mock_get_account_id, mock_generate_private_k
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-@patch('nanowallet.nanowallet.Block')
-async def test_send_raw_error(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_send_raw_error(mock_rpc, seed, index):
 
     mock_rpc.account_info.return_value = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
@@ -316,11 +278,7 @@ async def test_send_raw_error(mock_block, mock_get_account_id, mock_generate_pri
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_list_receivables(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_list_receivables(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": {
@@ -342,11 +300,7 @@ async def test_list_receivables(mock_get_account_id, mock_generate_private_key, 
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_list_receivables_none(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_list_receivables_none(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": ""
@@ -362,11 +316,7 @@ async def test_list_receivables_none(mock_get_account_id, mock_generate_private_
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_list_receivables_threshold(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_list_receivables_threshold(mock_rpc, seed, index):
 
     mock_rpc.receivable.return_value = {
         "blocks": {
@@ -387,10 +337,8 @@ async def test_list_receivables_threshold(mock_get_account_id, mock_generate_pri
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
 @patch('nanowallet.nanowallet.Block')
-async def test_receive_by_hash(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index):
+async def test_receive_by_hash(mock_block, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {"blocks":
                                          {"block_hash_to_receive": {"amount": "5",
@@ -417,10 +365,8 @@ async def test_receive_by_hash(mock_block, mock_get_account_id, mock_generate_pr
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
 @patch('nanowallet.nanowallet.Block')
-async def test_receive_by_hash_new_account(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index):
+async def test_receive_by_hash_new_account(mock_block, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {"blocks":
                                          {"block_hash_to_receive": {"amount": "5000",
@@ -489,11 +435,7 @@ def test_raw_to_nano():
 
 
 @pytest.mark.asyncio
-@patch('nanowallet.nanowallet.generate_account_private_key')
-@patch('nanowallet.nanowallet.get_account_id')
-async def test_receive_all(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_receive_all(mock_rpc, seed, index):
 
     # Mock the RPC calls
     mock_rpc.receivable.return_value = {
@@ -558,11 +500,7 @@ def test_sum_amount():
 
 
 @ pytest.mark.asyncio
-@ patch('nanowallet.nanowallet.generate_account_private_key')
-@ patch('nanowallet.nanowallet.get_account_id')
-async def test_receive_all_not_found(mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index, account, private_key):
-    mock_generate_private_key.return_value = private_key
-    mock_get_account_id.return_value = account
+async def test_receive_all_not_found(mock_rpc, seed, index):
 
     # Mock the RPC calls
     mock_rpc.receivable.return_value = {
@@ -583,7 +521,7 @@ async def test_receive_all_not_found(mock_get_account_id, mock_generate_private_
 
 
 @ pytest.mark.asyncio
-async def test_validate_work_send(mock_rpc, seed, index, account, private_key):
+async def test_validate_work_send(mock_rpc, seed, index):
 
     wallet = NanoWallet(mock_rpc, seed, index)
     wallet.account = "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o"
@@ -599,7 +537,7 @@ async def test_validate_work_send(mock_rpc, seed, index, account, private_key):
 
 
 @ pytest.mark.asyncio
-async def test_validate_work_receive(mock_rpc, seed, index, account, private_key):
+async def test_validate_work_receive(mock_rpc, seed, index):
 
     wallet = NanoWallet(mock_rpc, seed, index)
     wallet.account = "nano_348ggsrnzh44jp5cm1114r495fmz77tqf36fxunzg3ufmj3yzj5jhaat5ew1"
@@ -612,3 +550,53 @@ async def test_validate_work_receive(mock_rpc, seed, index, account, private_key
 
     block = await wallet._build_block(prev, rep, 500000000000000000000000000, source_hash=source_hash)
     assert block.block_hash == "1754AE5ED04C23DE2A7943DF60171061778ECD6901878877A71B39B83C233476"
+
+
+@pytest.mark.asyncio
+async def test_refund_first_sender(mock_rpc, seed, index):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+
+    # Mock the necessary methods
+    wallet.balance_raw = 1000
+    mock_rpc.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000",
+        "representative_block": "representative_block",
+        "open_block": "open_block_hash",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
+    }
+    mock_rpc.work_generate.return_value = {"work": "7fe398470f748c75"}
+    mock_rpc.process.return_value = {"hash": "processed_block_hash"}
+    mock_rpc.blocks_info.return_value = {"blocks":
+                                         {"open_block_hash": {"amount": "5",
+                                                              "source_account": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+                                                              "block_account": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+                                                              "subtype": "send"
+                                                              }}}
+
+    # Call the method
+    result = await wallet.refund_first_sender()
+
+    assert result.success == True
+    assert result.value == "processed_block_hash"
+
+
+@pytest.mark.asyncio
+async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    print(wallet.open_block)
+
+    mock_rpc.account_info.return_value = {
+        "error": "Account not found"
+    }
+    response = await wallet.refund_first_sender()
+
+    assert response.success == False
+    assert response.error == "No funds available to refund."

@@ -119,8 +119,6 @@ class NanoWallet:
             self.weight_raw = int(account_info["weight"])
             self.receivable_balance = raw_to_nano(account_info["receivable"])
             self.receivable_balance_raw = int(account_info["receivable"])
-        else:
-            raise ValueError(get_error(account_info))
 
     @handle_errors
     @reload_after
@@ -309,7 +307,8 @@ class NanoWallet:
         :return: The hash of the sent block.
         :raises ValueError: If no funds are available or the refund account cannot be determined.
         """
-        if not await self.has_balance():
+        has_balance = await self.has_balance()
+        if not has_balance.unwrap():
             raise ValueError("No funds available to refund.")
         if self.open_block:
             block_info = await self._block_info(self.open_block)
@@ -320,7 +319,10 @@ class NanoWallet:
             refund_account = block_info['source_account']
         else:
             raise ValueError("Cannot determine refund account.")
-        return await self.sweep(refund_account)
+
+        response = await self.sweep(refund_account)
+        result = response.unwrap()
+        return result
 
     @handle_errors
     async def has_balance(self) -> bool:
