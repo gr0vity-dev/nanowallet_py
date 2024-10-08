@@ -393,9 +393,11 @@ async def test_list_receivables_threshold(mock_get_account_id, mock_generate_pri
 async def test_receive_by_hash(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {"blocks":
-                                         {"block_hash_to_receive":
-                                          {"amount": "5",
-                                              "source_account": "source_account1", }}}
+                                         {"block_hash_to_receive": {"amount": "5",
+                                                                    "source_account": "0",
+                                                                    "block_account": "source_account1",
+                                                                    "subtype": "send"
+                                                                    }}}
     mock_rpc.account_info.return_value = {
         "frontier": "frontier_block",
         "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
@@ -421,9 +423,11 @@ async def test_receive_by_hash(mock_block, mock_get_account_id, mock_generate_pr
 async def test_receive_by_hash_new_account(mock_block, mock_get_account_id, mock_generate_private_key, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {"blocks":
-                                         {"block_hash_to_receive":
-                                          {"amount": "5000",
-                                              "source_account": "source_account1", }}}
+                                         {"block_hash_to_receive": {"amount": "5000",
+                                                                    "source_account": "0",
+                                                                    "block_account": "source_account1",
+                                                                    "subtype": "send"
+                                                                    }}}
     mock_rpc.account_info.return_value = {
         "error": "Account not found"
     }
@@ -498,17 +502,18 @@ async def test_receive_all(mock_get_account_id, mock_generate_private_key, mock_
             "0000000000000000000000000000000000000000000000000000000000001234": "27"
         }
     }
+
     mock_rpc.blocks_info.return_value = {
         "blocks": {
             "763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4": {
-                "block_account": "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o",
+                "block_account": "source_account1",
                 "amount": "500000000000000000000000000",
-                "source_account": "source_account1",
+                "source_account": "0",
             },
             "0000000000000000000000000000000000000000000000000000000000001234": {
-                "block_account": "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o",
+                "block_account": "source_account2",
                 "amount": "2",
-                "source_account": "source_account2",
+                "source_account": "0",
             }
         }
     }
@@ -575,3 +580,35 @@ async def test_receive_all_not_found(mock_get_account_id, mock_generate_private_
 
     assert result.success == False
     assert result.error == "Error raised by RPC : Block not found 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
+
+
+@ pytest.mark.asyncio
+async def test_validate_work_send(mock_rpc, seed, index, account, private_key):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet.account = "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o"
+
+    mock_rpc.work_generate.return_value = {"work": "b97cf24869b976eb"}
+
+    prev = "474B9BEBD9AB9B39E05F0260555A31ECFB05E4BB0B2F6386904B9CEAD222FA0D"
+    rep = "nano_3nbst43by3nytxfzcbmw5sdoq78i394ppso34cm5861eom6q45niyochomnp"
+    destination = "nano_348ggsrnzh44jp5cm1114r495fmz77tqf36fxunzg3ufmj3yzj5jhaat5ew1"
+
+    block = await wallet._build_block(prev, rep, 927438000000000000000000000000, destination_account=destination)
+    assert block.block_hash == "6EC6792F999FA02F0026FC7702E04FD23BA4B4736E26A5EDB578CEE3A8CBFD6D"
+
+
+@ pytest.mark.asyncio
+async def test_validate_work_receive(mock_rpc, seed, index, account, private_key):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet.account = "nano_348ggsrnzh44jp5cm1114r495fmz77tqf36fxunzg3ufmj3yzj5jhaat5ew1"
+
+    mock_rpc.work_generate.return_value = {"work": "7fe398470f748c75"}
+
+    prev = "0" * 64
+    rep = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
+    source_hash = "6EC6792F999FA02F0026FC7702E04FD23BA4B4736E26A5EDB578CEE3A8CBFD6D"
+
+    block = await wallet._build_block(prev, rep, 500000000000000000000000000, source_hash=source_hash)
+    assert block.block_hash == "1754AE5ED04C23DE2A7943DF60171061778ECD6901878877A71B39B83C233476"

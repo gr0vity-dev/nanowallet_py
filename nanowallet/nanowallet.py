@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error, raise_error
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
-from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id
+from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 
 
 class NanoWallet:
@@ -50,15 +50,28 @@ class NanoWallet:
 
     async def _build_block(self, previous: str, representative: str, balance: int,
                            source_hash: Optional[str] = None, destination_account: Optional[str] = None) -> Block:
+
+        if source_hash and destination_account:
+            raise ValueError(
+                "Specify either `source_hash` or `destination_account`. Never both")
+        if not source_hash and not destination_account:
+            raise ValueError(
+                "Missing argument. Specify either `source_hash` or `destination_account`.")
+
+        if destination_account:
+            link = get_account_public_key(account_id=destination_account)
+        elif source_hash:
+            link = source_hash
+
         block = Block(
             block_type='state',
             account=self.account,
             previous=previous,
             representative=representative,
             balance=balance,
-            link=source_hash,
-            link_as_account=destination_account
+            link=link
         )
+
         Block.sign(block, self.private_key)
         work = await self._generate_work(block.work_block_hash)
         block.work = work
@@ -69,7 +82,7 @@ class NanoWallet:
         return response
 
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
-        response = await self.rpc.blocks_info([block_hash], source=True, json_block=True)
+        response = await self.rpc.blocks_info([block_hash], source=True, receive_hash=True, json_block=True)
         raise_error(response, more=f" {block_hash}")
         return response['blocks'][block_hash]
 
@@ -238,8 +251,8 @@ class NanoWallet:
         :return: A dictionary with information about the received block.
         :raises ValueError: If the block is not found.
         """
-        block_info = await self._block_info(block_hash)
-        amount_raw = int(block_info['amount'])
+        send_block_info = await self._block_info(block_hash)
+        amount_raw = int(send_block_info['amount'])
 
         account_info = await self._account_info()
         if account_not_found(account_info):
@@ -268,7 +281,7 @@ class NanoWallet:
             'hash': response['hash'],
             'amount_raw': amount_raw,
             'amount': raw_to_nano(amount_raw),
-            'source': block_info['source_account']
+            'source': send_block_info['block_account']
         }
 
         return result
