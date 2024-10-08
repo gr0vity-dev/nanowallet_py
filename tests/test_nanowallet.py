@@ -574,4 +574,4 @@ async def test_receive_all_not_found(mock_get_account_id, mock_generate_private_
     result = await wallet.receive_all()
 
     assert result.success == False
-    assert result.error == "Block not found: 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
+    assert result.error == "Error raised by RPC : Block not found 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"

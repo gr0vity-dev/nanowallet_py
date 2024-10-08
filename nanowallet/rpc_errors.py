@@ -12,6 +12,11 @@ def no_error(response):
     return True
 
 
+def raise_error(response, more=None):
+    if 'error' in response:
+        raise ValueError(f"Error raised by RPC : {response['error']}{more}")
+
+
 def get_error(response):
     if 'error' in response:
         return response['error']

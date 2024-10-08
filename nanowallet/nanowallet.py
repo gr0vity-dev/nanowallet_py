@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
-from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error
+from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error, raise_error
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id
 
@@ -69,22 +69,24 @@ class NanoWallet:
         return response
 
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
-        block_info = await self.rpc.blocks_info([block_hash], source=True, json_block=True)
-        if block_not_found(block_info):
-            raise ValueError(f"Block not found: {block_hash}")
-        return block_info['blocks'][block_hash]
+        response = await self.rpc.blocks_info([block_hash], source=True, json_block=True)
+        raise_error(response, more=f" {block_hash}")
+        return response['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
-        work = await self.rpc.work_generate(pow_hash, use_peers=self.use_work_peers)
-        return work['work']
+        response = await self.rpc.work_generate(pow_hash, use_peers=self.use_work_peers)
+        raise_error(response)
+        return response['work']
 
     @handle_errors
     async def reload(self):
         """
         Reloads the wallet's account information and receivable blocks.
         """
-        receivables = await self.rpc.receivable(self.account, threshold=1)
-        self.receivable_blocks = receivables["blocks"]
+        response = await self.rpc.receivable(self.account, threshold=1)
+        raise_error(response)
+
+        self.receivable_blocks = response["blocks"]
         account_info = await self._account_info()
         if account_not_found(account_info) and self.receivable_blocks:
             # New account with receivable blocks
@@ -144,6 +146,7 @@ class NanoWallet:
         )
 
         response = await self.rpc.process(block.json())
+        raise_error(response)
         return response['hash']
 
     @handle_errors
@@ -191,6 +194,7 @@ class NanoWallet:
         )
 
         response = await self.rpc.process(block.json())
+        raise_error(response)
         return response['hash']
 
     @handle_errors
@@ -258,6 +262,7 @@ class NanoWallet:
         )
 
         response = await self.rpc.process(block.json())
+        raise_error(response)
 
         result = {
             'hash': response['hash'],
