@@ -6,6 +6,18 @@ def account_not_found(response):
     return False
 
 
+def no_error(response):
+    if 'error' in response:
+        return False
+    return True
+
+
+def get_error(response):
+    if 'error' in response:
+        return response['error']
+    return None
+
+
 def zero_balance(response):
     if 'balance' in response:
         if response['balance'] == '0':

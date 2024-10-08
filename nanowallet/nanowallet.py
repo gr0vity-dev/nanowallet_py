@@ -1,7 +1,8 @@
 # nano_wallet_lib/nanowallet.py
 from __future__ import annotations
+from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
-from .rpc_errors import account_not_found, zero_balance, block_not_found
+from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id
 
@@ -13,14 +14,15 @@ class NanoWallet:
 
     def __init__(self, rpc: NanoRpcTyped, seed: str, index: int,
                  use_work_peers: bool = True,
-                 default_representative="nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"):
+                 default_representative: str = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"):
         """
         Initializes the NanoWallet.
 
-        :param rpc: An instance of NanoRpc client.
+        :param rpc: An instance of NanoRpcTyped client.
         :param seed: The seed of the wallet.
         :param index: The account index derived from the seed.
         :param use_work_peers: Whether to use work peers for PoW generation.
+        :param default_representative: defaults to gr0vity's representative node.
         """
         self.rpc = rpc
         self.seed = seed
@@ -30,11 +32,11 @@ class NanoWallet:
 
         self.private_key = generate_account_private_key(seed, index)
         self.account = get_account_id(private_key=self.private_key)
-        self.balance = 0
-        self.weight = 0
+        self.balance = 0.0
+        self.weight = 0.0
         self.balance_raw = 0
         self.weight_raw = 0
-        self.receivable_balance = 0
+        self.receivable_balance = 0.0
         self.receivable_balance_raw = 0
         self.confirmation_height = 0
         self.block_count = 0
@@ -44,9 +46,10 @@ class NanoWallet:
         self.representative = None
         self.open_block = None
 
-        self.receivable_blocks = []
+        self.receivable_blocks = {}
 
-    async def _build_block(self, previous, representative, balance, source_hash=None, destination_account=None):
+    async def _build_block(self, previous: str, representative: str, balance: int,
+                           source_hash: Optional[str] = None, destination_account: Optional[str] = None) -> Block:
         block = Block(
             block_type='state',
             account=self.account,
@@ -61,40 +64,34 @@ class NanoWallet:
         block.work = work
         return block
 
-    async def _account_info(self):
-        return await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
+    async def _account_info(self) -> Dict[str, Any]:
+        response = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
+        return response
 
-    async def _block_info(self, block_hash: str) -> str:
+    async def _block_info(self, block_hash: str) -> Dict[str, Any]:
         block_info = await self.rpc.blocks_info([block_hash], source=True, json_block=True)
         if block_not_found(block_info):
             raise ValueError(f"Block not found: {block_hash}")
         return block_info['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
-        """
-        Generates work for a given hash.
-
-        :param pow_hash: The hash to generate work for.
-        :return: The generated work.
-        """
         work = await self.rpc.work_generate(pow_hash, use_peers=self.use_work_peers)
         return work['work']
-#
 
     @handle_errors
     async def reload(self):
+        """
+        Reloads the wallet's account information and receivable blocks.
+        """
         receivables = await self.rpc.receivable(self.account, threshold=1)
         self.receivable_blocks = receivables["blocks"]
         account_info = await self._account_info()
-
         if account_not_found(account_info) and self.receivable_blocks:
-            # new account with receivables blocks
-            self.receivable_balance_raw = 0
-            for _, amount in self.receivable_blocks.items():
-                self.receivable_balance_raw += int(amount)
+            # New account with receivable blocks
+            self.receivable_balance_raw = sum(
+                int(amount) for amount in self.receivable_blocks.values())
             self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
-
-        if not account_not_found(account_info):
+        elif no_error(account_info):
             self.balance = raw_to_nano(account_info["balance"])
             self.balance_raw = int(account_info["balance"])
             self.frontier_block = account_info["frontier"]
@@ -107,6 +104,8 @@ class NanoWallet:
             self.weight_raw = int(account_info["weight"])
             self.receivable_balance = raw_to_nano(account_info["receivable"])
             self.receivable_balance_raw = int(account_info["receivable"])
+        else:
+            raise ValueError(get_error(account_info))
 
     @handle_errors
     @reload_after
@@ -117,6 +116,7 @@ class NanoWallet:
         :param destination_account: The destination account ID.
         :param amount: The amount in Nano.
         :return: The hash of the sent block.
+        :raises ValueError: If the destination account ID is invalid, account not found, or insufficient balance.
         """
         if not validate_account_id(destination_account):
             raise ValueError("Invalid destination account ID.")
@@ -125,9 +125,9 @@ class NanoWallet:
 
         account_info = await self._account_info()
         if account_not_found(account_info):
-            raise ValueError("Account not found")
+            raise ValueError("Account not found.")
         if zero_balance(account_info):
-            raise ValueError("Unsufficient balance")
+            raise ValueError("Insufficient balance.")
 
         balance = int(account_info["balance"])
         new_balance = balance - amount_raw
@@ -135,13 +135,18 @@ class NanoWallet:
             msg = f"Insufficient funds! Balance:{balance} amount:{amount_raw}"
             raise ValueError(msg)
 
-        block = await self._build_block(account_info["frontier"], account_info["representative"], new_balance, destination_account=destination_account)
+        block = await self._build_block(
+            previous=account_info["frontier"],
+            representative=account_info["representative"],
+            balance=new_balance,
+            destination_account=destination_account
+        )
 
         response = await self.rpc.process(block.json())
         return response['hash']
 
     @handle_errors
-    async def send_raw(self, destination_account, amount_raw: int) -> str:
+    async def send_raw(self, destination_account: str, amount_raw: int) -> str:
         """
         Sends Nano to a destination account.
 
@@ -151,43 +156,51 @@ class NanoWallet:
         """
         amount = raw_to_nano(amount_raw)
         response = await self.send(destination_account, amount)
-        if response.success:
-            return response.value
+        return response
 
     @handle_errors
     @reload_after
-    async def sweep(self, destination_account: str, sweep_pending=True, threshold_raw=None) -> str:
+    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = None) -> str:
         """
         Transfers all funds from the current account to the destination account.
 
         :param destination_account: The account ID to receive the funds.
+        :param sweep_pending: Whether to receive pending blocks before sending.
+        :param threshold_raw: Minimum amount to consider for receiving pending blocks (in raw).
         :return: The hash of the sent block.
+        :raises ValueError: If the destination account ID is invalid or insufficient balance.
         """
         if not validate_account_id(destination_account):
             raise ValueError("Invalid destination account ID.")
 
         if sweep_pending:
-            result = await self.receive_all(threshold_raw=threshold_raw)
+            await self.receive_all(threshold_raw=threshold_raw)
 
         account_info = await self._account_info()
         if account_not_found(account_info):
-            raise ValueError("Account not found")
+            raise ValueError("Account not found.")
         if zero_balance(account_info):
-            raise ValueError("Unsufficient balance")
+            raise ValueError("Insufficient balance.")
 
-        block = await self._build_block(account_info["frontier"], account_info["representative"], 0, destination_account=destination_account)
+        block = await self._build_block(
+            previous=account_info["frontier"],
+            representative=account_info["representative"],
+            balance=0,
+            destination_account=destination_account
+        )
 
         response = await self.rpc.process(block.json())
         return response['hash']
 
     @handle_errors
-    async def list_receivables(self, threshold_raw: int = None) -> list:
+    async def list_receivables(self, threshold_raw: int = None) -> List[tuple]:
         """
         Lists receivable blocks sorted by descending amount.
+
         :param threshold_raw: Minimum amount to consider (in raw).
-        :return: A list of receivable blocks.
+        :return: A list of tuples containing block hashes and amounts.
         """
-        await self.has_balance()
+        await self.reload()
 
         # If receivable_blocks is empty, return an empty list
         if not self.receivable_blocks:
@@ -217,7 +230,8 @@ class NanoWallet:
         Receives a specific block by its hash.
 
         :param block_hash: The hash of the block to receive.
-        :return: The hash of the received block.
+        :return: A dictionary with information about the received block.
+        :raises ValueError: If the block is not found.
         """
         block_info = await self._block_info(block_hash)
         amount_raw = int(block_info['amount'])
@@ -235,7 +249,12 @@ class NanoWallet:
 
         new_balance = balance + amount_raw
 
-        block = await self._build_block(previous, representative, new_balance, source_hash=block_hash)
+        block = await self._build_block(
+            previous=previous,
+            representative=representative,
+            balance=new_balance,
+            source_hash=block_hash
+        )
 
         response = await self.rpc.process(block.json())
 
@@ -264,34 +283,45 @@ class NanoWallet:
                 raise ValueError(response.error)
         return block_results
 
-    @ handle_errors
+    @handle_errors
     async def refund_first_sender(self) -> str:
         """
         Sends remaining funds to the account opener.
-        """
-        if await self.has_balance():
-            if self.open_block:
-                block_info = await self._block_info(self.open_block)
-                refund_account = block_info['source_account']
-            elif self.receivable_blocks:
-                refund_account = list(self.receivable_blocks.values())[
-                    0]['source']
 
+        :return: The hash of the sent block.
+        :raises ValueError: If no funds are available or the refund account cannot be determined.
+        """
+        if not await self.has_balance():
+            raise ValueError("No funds available to refund.")
+        if self.open_block:
+            block_info = await self._block_info(self.open_block)
+            refund_account = block_info['source_account']
+        elif self.receivable_blocks:
+            first_receivable_hash = next(iter(self.receivable_blocks))
+            block_info = await self._block_info(first_receivable_hash)
+            refund_account = block_info['source_account']
+        else:
+            raise ValueError("Cannot determine refund account.")
         return await self.sweep(refund_account)
 
-    @ handle_errors
+    @handle_errors
     async def has_balance(self) -> bool:
         """
-        Returns true if account has either available balance, receivable balance or both
+        Checks if the account has available balance or receivable balance.
+
+        :return: True if balance or receivable balance is greater than zero, False otherwise.
         """
         await self.reload()
-        if (self.balance_raw and self.balance_raw > 0) or (self.receivable_balance and self.receivable_balance > 0):
+        if (self.balance_raw and self.balance_raw > 0) or (self.receivable_balance_raw and self.receivable_balance_raw > 0):
             return True
+        return False
 
-    @ handle_errors
-    async def balance(self) -> dict:
+    @handle_errors
+    async def balance_info(self) -> dict:
         """
-        Returns the balance and receivable balance in nano and raw amount
+        Returns the balance and receivable balance in Nano and raw amounts.
+
+        :return: A dictionary containing balance information.
         """
         await self.reload()
         return {
@@ -305,23 +335,32 @@ class NanoWallet:
 class WalletUtils:
 
     @staticmethod
-    def raw_to_nano(amount_raw) -> float:
+    def raw_to_nano(amount_raw: int) -> float:
         """
         Converts raw amount to Nano.
+
+        :param amount_raw: The amount in raw.
+        :return: The amount in Nano.
         """
         return raw_to_nano(amount_raw)
 
     @staticmethod
-    def nano_to_raw(amount_raw) -> int:
+    def nano_to_raw(amount_nano: float) -> int:
         """
-        Converts raw amount to Nano.
+        Converts Nano amount to raw amount.
+
+        :param amount_nano: The amount in Nano.
+        :return: The amount in raw.
         """
-        return nano_to_raw(amount_raw)
+        return nano_to_raw(amount_nano)
 
     @staticmethod
-    def sum_received_amount(receive_all_response: list):
+    def sum_received_amount(receive_all_response: List[dict]) -> dict:
         """
         Sums the amount_raw values from a list of receivable responses.
+
+        :param receive_all_response: A list of dictionaries containing 'amount_raw'.
+        :return: A dictionary with the total amount in raw and Nano.
         """
         total_amount_raw = sum(int(item['amount_raw'])
                                for item in receive_all_response)
