@@ -127,14 +127,25 @@ class NanoWallet:
         Sends Nano to a destination account.
 
         :param destination_account: The destination account ID.
-        :param amount: The amount in Nano.
+        :param amount: The amount in Nano. (float precision !!!)
         :return: The hash of the sent block.
         :raises ValueError: If the destination account ID is invalid, account not found, or insufficient balance.
         """
+        amount_raw = nano_to_raw(amount)
+        response = await self.send_raw(destination_account, amount_raw)
+        return response.unwrap()
+
+    @handle_errors
+    async def send_raw(self, destination_account: str, amount_raw: int) -> str:
+        """
+        Sends Nano to a destination account.
+
+        :param destination_account: The destination account ID.
+        :param amount_raw: The amount in raw.
+        :return: The hash of the sent block.
+        """
         if not validate_account_id(destination_account):
             raise ValueError("Invalid destination account ID.")
-
-        amount_raw = nano_to_raw(amount)
 
         account_info = await self._account_info()
         if account_not_found(account_info):
@@ -161,19 +172,6 @@ class NanoWallet:
         return response['hash']
 
     @handle_errors
-    async def send_raw(self, destination_account: str, amount_raw: int) -> str:
-        """
-        Sends Nano to a destination account.
-
-        :param destination_account: The destination account ID.
-        :param amount_raw: The amount in raw.
-        :return: The hash of the sent block.
-        """
-        amount = raw_to_nano(amount_raw)
-        response = await self.send(destination_account, amount)
-        return response.unwrap()
-
-    @handle_errors
     @reload_after
     async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = None) -> str:
         """
@@ -191,22 +189,8 @@ class NanoWallet:
         if sweep_pending:
             await self.receive_all(threshold_raw=threshold_raw)
 
-        account_info = await self._account_info()
-        if account_not_found(account_info):
-            raise ValueError("Account not found.")
-        if zero_balance(account_info):
-            raise ValueError("Insufficient balance.")
-
-        block = await self._build_block(
-            previous=account_info["frontier"],
-            representative=account_info["representative"],
-            balance=0,
-            destination_account=destination_account
-        )
-
-        response = await self.rpc.process(block.json())
-        raise_error(response)
-        return response['hash']
+        response = await self.send_raw(destination_account, self.balance_raw)
+        return response.unwrap()
 
     @handle_errors
     async def list_receivables(self, threshold_raw: int = None) -> List[tuple]:
@@ -284,10 +268,12 @@ class NanoWallet:
 
         return result
 
-    @ handle_errors
+    @handle_errors
+    @reload_after
     async def receive_all(self, threshold_raw: float = None) -> list:
         """
         Receives all pending receivable blocks.
+        :return: A list of dictionary with information about each received block.
         """
         block_results = []
         response = await self.list_receivables(threshold_raw=threshold_raw)
@@ -350,6 +336,26 @@ class NanoWallet:
             "receivable_balance": self.receivable_balance,
             "receivable_balance_raw": self.receivable_balance_raw,
         }
+
+    def to_string(self):
+        return (f"NanoWallet:\n"
+                f"  Account: {self.account}\n"
+                f"  Balance: {self.balance} Nano\n"
+                f"  Balance raw: {self.balance_raw} raw\n"
+                f"  Receivable Balance: {self.receivable_balance} Nano\n"
+                f"""  Receivable Balance raw: {
+                    self.receivable_balance_raw} raw\n"""
+                f"  Voting Weight: {self.weight} Nano\n"
+                f"  Voting Weight raw: {self.weight_raw} raw\n"
+                f"  Representative: {self.representative}\n"
+                f"  Confirmation Height: {self.confirmation_height}\n"
+                f"  Block Count: {self.block_count}")
+
+    def __str__(self):
+        return (f"NanoWallet:\n"
+                f"  Account: {self.account}\n"
+                f"  Balance raw: {self.balance_raw} raw\n"
+                f"  Receivable Balance raw: {self.receivable_balance_raw} raw")
 
 
 class WalletUtils:

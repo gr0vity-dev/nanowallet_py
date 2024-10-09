@@ -271,7 +271,7 @@ async def test_send_raw_error(mock_rpc, seed, index):
     mock_rpc.process.return_value = {"hash": "processed_block_hash"}
 
     wallet = NanoWallet(mock_rpc, seed, index)
-    result = await wallet.send_raw("nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1e30)
+    result = await wallet.send_raw("nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1000000000000000000000000000000)
 
     assert result.success == False
     assert result.error == "Insufficient funds! balance_raw:2000 amount_raw:1000000000000000000000000000000"
@@ -481,9 +481,9 @@ async def test_receive_all(mock_rpc, seed, index):
         {"hash": "0000000000000000000000000000000000000000000000000000000000007777",
             "amount_raw": 2, 'amount': 2e-30, 'source': 'source_account2'}
     ]
-    assert mock_rpc.receivable.call_count == 3
+    assert mock_rpc.receivable.call_count == 4
     assert mock_rpc.blocks_info.call_count == 2
-    assert mock_rpc.account_info.call_count == 5
+    assert mock_rpc.account_info.call_count == 6
     assert mock_rpc.work_generate.call_count == 2
     assert mock_rpc.process.call_count == 2
 
@@ -600,3 +600,42 @@ async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
 
     assert response.success == False
     assert response.error == "No funds available to refund."
+
+
+@pytest.mark.asyncio
+async def test_wallett_to_str(mock_rpc, seed, index):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    mock_rpc.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000"
+    }
+    await wallet.reload()
+
+    expected_to_string = """NanoWallet:
+  Account: nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s
+  Balance: 2.0 Nano
+  Balance raw: 2000000000000000000000000000000 raw
+  Receivable Balance: 1.0 Nano
+  Receivable Balance raw: 1000000000000000000000000000000 raw
+  Voting Weight: 3.0 Nano
+  Voting Weight raw: 3000000000000000000000000000000 raw
+  Representative: nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf
+  Confirmation Height: 1
+  Block Count: 50"""
+
+    expected__str__ = """NanoWallet:
+  Account: nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s
+  Balance raw: 2000000000000000000000000000000 raw
+  Receivable Balance raw: 1000000000000000000000000000000 raw"""
+
+    assert wallet.to_string() == expected_to_string
+    assert str(wallet) == expected__str__
