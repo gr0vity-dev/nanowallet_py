@@ -553,13 +553,15 @@ async def test_validate_work_receive(mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-async def test_refund_first_sender(mock_rpc, seed, index):
+async def test_refund_first_sender_unopened(mock_rpc, seed, index):
 
     wallet = NanoWallet(mock_rpc, seed, index)
 
     # Mock the necessary methods
     wallet.balance_raw = 1000
-    mock_rpc.account_info.return_value = {
+
+    account_info_not_found = {"error": "Account not found"}
+    account_info_found = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
         "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
         "balance": "2000",
@@ -571,15 +573,25 @@ async def test_refund_first_sender(mock_rpc, seed, index):
         "weight": "3000000000000000000000000000000",
         "receivable": "1000000000000000000000000000000"
     }
+    # Create side effects for account_info calls
+    account_info_responses = [
+        account_info_not_found, account_info_not_found, account_info_not_found, account_info_not_found, account_info_not_found, account_info_found
+    ]
+    mock_rpc.account_info.side_effect = account_info_responses
+    mock_rpc.receivable.return_value = {
+        "blocks": {
+            "1234000000000000000000000000000000000000000000000000000000000000": "3187918000000000000000000000000"}
+    }
     mock_rpc.work_generate.return_value = {"work": "7fe398470f748c75"}
     mock_rpc.process.return_value = {"hash": "processed_block_hash"}
-    mock_rpc.blocks_info.return_value = {"blocks":
-                                         {"open_block_hash": {"amount": "5",
-                                                              "source_account": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
-                                                              "block_account": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
-                                                              "subtype": "send"
-                                                              }}}
-
+    mock_rpc.blocks_info.return_value = {'blocks': {'1234000000000000000000000000000000000000000000000000000000000000':
+                                                    {'block_account': 'nano_118tih7f81iiuujdezyqnbb9aonybf6y3cj7mo7hbeetqiymkn16a67w8rkp',
+                                                     'amount': '3187918000000000000000000000000',
+                                                     'balance': '704403060752542192142227299368960',
+                                                     'confirmed': 'true',
+                                                     'subtype': 'send',
+                                                     'receive_hash': '0000000000000000000000000000000000000000000000000000000000000000',
+                                                     'source_account': '0'}}}
     # Call the method
     result = await wallet.refund_first_sender()
 
@@ -588,7 +600,7 @@ async def test_refund_first_sender(mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
+async def test_refund_first_sender_no_account(mock_rpc, seed, index):
 
     wallet = NanoWallet(mock_rpc, seed, index)
     print(wallet.open_block)
@@ -596,6 +608,30 @@ async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
     mock_rpc.account_info.return_value = {
         "error": "Account not found"
     }
+    response = await wallet.refund_first_sender()
+
+    assert response.success == False
+    assert response.error == "No funds available to refund."
+
+
+@pytest.mark.asyncio
+async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    mock_rpc.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "0",
+        "representative_block": "representative_block",
+        "open_block": "open_block_hash",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "0"
+    }
+    mock_rpc.blocks_info.return_value = {"blocks": ""}
+
     response = await wallet.refund_first_sender()
 
     assert response.success == False
@@ -639,3 +675,11 @@ async def test_wallett_to_str(mock_rpc, seed, index):
 
     assert wallet.to_string() == expected_to_string
     assert str(wallet) == expected__str__
+
+
+@pytest.mark.asyncio
+async def test_valid_account(mock_rpc, seed):
+
+    wallet = NanoWallet(mock_rpc, seed, 25)
+    wallet.account = "nano_14ckiit8au8njgzrm4gb9se7d8yf3enec6mdy7154gr8qh3cu1yf9nqgomh3"
+    await wallet.reload()

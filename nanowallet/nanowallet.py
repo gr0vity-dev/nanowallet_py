@@ -302,7 +302,7 @@ class NanoWallet:
         elif self.receivable_blocks:
             first_receivable_hash = next(iter(self.receivable_blocks))
             block_info = await self._block_info(first_receivable_hash)
-            refund_account = block_info['source_account']
+            refund_account = block_info['block_account']
         else:
             raise ValueError("Cannot determine refund account.")
 
