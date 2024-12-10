@@ -6,6 +6,10 @@ from .rpc_errors import account_not_found, zero_balance, block_not_found, no_err
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class InsufficientBalanceError(ValueError):
@@ -67,10 +71,12 @@ class NanoWallet:
         """
         # Validate seed
         if not isinstance(seed, str) or len(seed) != SEED_LENGTH or not all(c in '0123456789abcdefABCDEF' for c in seed):
+            logger.error(f"Invalid seed format provided: length={len(seed) if isinstance(seed, str) else 'N/A'}")
             raise InvalidSeedError("Seed must be a 64 character hex string")
 
         # Validate index
         if not isinstance(index, int) or index < 0 or index > MAX_INDEX:
+            logger.error(f"Invalid index provided: {index}")
             raise InvalidIndexError(f"Index must be between 0 and {MAX_INDEX}")
 
         self.rpc = rpc
@@ -80,6 +86,7 @@ class NanoWallet:
 
         self.private_key = generate_account_private_key(self.seed, index)
         self.account = get_account_id(private_key=self.private_key)
+        logger.info(f"Initialized wallet for account {self.account} with index {index}")
         self._init_account_state()
 
     def _init_account_state(self):
@@ -233,15 +240,20 @@ class NanoWallet:
         :raises InvalidAccountError: If destination account is invalid
         :raises InsufficientBalanceError: If insufficient balance
         """
+        logger.info(f"Attempting to send {amount_raw} raw to {destination_account}")
+        
         if not validate_account_id(destination_account):
+            logger.error(f"Invalid destination account: {destination_account}")
             raise InvalidAccountError("Invalid destination account ID.")
 
         params = await self._get_block_params()
         if params['balance'] == 0:
+            logger.error(f"Insufficient balance for send: balance=0 amount={amount_raw}")
             raise InsufficientBalanceError("Insufficient balance.")
 
         new_balance = params['balance'] - amount_raw
         if new_balance < 0:
+            logger.error(f"Insufficient balance for send: balance={params['balance']} amount={amount_raw}")
             msg = f"Insufficient funds! balance_raw:{params['balance']} amount_raw:{amount_raw}"
             raise InsufficientBalanceError(msg)
 
@@ -254,6 +266,7 @@ class NanoWallet:
 
         response = await self.rpc.process(block.json())
         raise_error(response)
+        logger.info(f"Successfully sent {amount_raw} raw to {destination_account}, hash: {response['hash']}")
         return response['hash']
 
     @handle_errors
@@ -318,8 +331,11 @@ class NanoWallet:
         :return: A dictionary with information about the received block.
         :raises ValueError: If the block is not found.
         """
+        logger.info(f"Attempting to receive block {block_hash}")
+        
         send_block_info = await self._block_info(block_hash)
         amount_raw = int(send_block_info['amount'])
+        logger.debug(f"Block {block_hash} contains {amount_raw} raw")
 
         params = await self._get_block_params()
         new_balance = params['balance'] + amount_raw
@@ -340,7 +356,8 @@ class NanoWallet:
             'amount': raw_to_nano(amount_raw),
             'source': send_block_info['block_account']
         }
-
+        
+        logger.info(f"Successfully received {amount_raw} raw from {send_block_info['block_account']}, hash: {response['hash']}")
         return result
 
     @handle_errors
@@ -423,8 +440,7 @@ class NanoWallet:
                 f"  Balance: {self.balance} Nano\n"
                 f"  Balance raw: {self.balance_raw} raw\n"
                 f"  Receivable Balance: {self.receivable_balance} Nano\n"
-                f"""  Receivable Balance raw: {
-                    self.receivable_balance_raw} raw\n"""
+                f"  Receivable Balance raw: {self.receivable_balance_raw} raw\n"
                 f"  Voting Weight: {self.weight} Nano\n"
                 f"  Voting Weight raw: {self.weight_raw} raw\n"
                 f"  Representative: {self.representative}\n"
@@ -446,12 +462,14 @@ class NanoWallet:
         """
         account_info = await self._account_info()
         if account_not_found(account_info):
+            logger.debug(f"Account {self.account} not found, using default parameters")
             return {
                 'previous': ZERO_HASH,
                 'balance': 0,
                 'representative': self.config.default_representative
             }
         
+        logger.debug(f"Retrieved block params for {self.account}: balance={account_info['balance']}")
         return {
             'previous': account_info["frontier"],
             'balance': int(account_info["balance"]),
