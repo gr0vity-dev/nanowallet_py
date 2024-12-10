@@ -50,7 +50,17 @@ class NanoWallet:
 
     async def _build_block(self, previous: str, representative: str, balance: int,
                            source_hash: Optional[str] = None, destination_account: Optional[str] = None) -> Block:
-
+        """
+        Builds a state block with the given parameters.
+        
+        :param previous: Previous block hash or zeros for first block
+        :param representative: Representative account
+        :param balance: Account balance after this block
+        :param source_hash: Hash of send block to receive (for receive blocks)
+        :param destination_account: Destination account (for send blocks)
+        :return: Block instance
+        :raises ValueError: If parameters are invalid
+        """
         if source_hash and destination_account:
             raise ValueError(
                 "Specify either `source_hash` or `destination_account`. Never both")
@@ -58,10 +68,15 @@ class NanoWallet:
             raise ValueError(
                 "Missing argument. Specify either `source_hash` or `destination_account`.")
 
+        # Initialize link before using it
+        link = None
         if destination_account:
             link = get_account_public_key(account_id=destination_account)
         elif source_hash:
             link = source_hash
+
+        if link is None:
+            raise ValueError("Failed to generate link value")
 
         block = Block(
             block_type='state',
@@ -78,15 +93,34 @@ class NanoWallet:
         return block
 
     async def _account_info(self) -> Dict[str, Any]:
+        """
+        Get account information from the RPC.
+        
+        :return: Dictionary containing account information including balance, representative, etc.
+        """
         response = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
         return response
 
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
+        """
+        Get information about a specific block.
+        
+        :param block_hash: The hash of the block to get information about
+        :return: Dictionary containing block information
+        :raises ValueError: If block is not found or RPC returns an error
+        """
         response = await self.rpc.blocks_info([block_hash], source=True, receive_hash=True, json_block=True)
         raise_error(response, more=f" {block_hash}")
         return response['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
+        """
+        Generate proof of work for a block.
+        
+        :param pow_hash: The hash to generate work for
+        :return: The generated work value
+        :raises ValueError: If work generation fails
+        """
         response = await self.rpc.work_generate(pow_hash, use_peers=self.use_work_peers)
         raise_error(response)
         return response['work']
@@ -136,6 +170,7 @@ class NanoWallet:
         return response.unwrap()
 
     @handle_errors
+    @reload_after
     async def send_raw(self, destination_account: str, amount_raw: int) -> str:
         """
         Sends Nano to a destination account.
@@ -323,11 +358,16 @@ class NanoWallet:
         return False
 
     @handle_errors
+    @reload_after
     async def balance_info(self) -> dict:
         """
-        Returns the balance and receivable balance in Nano and raw amounts.
-
-        :return: A dictionary containing balance information.
+        Get detailed balance information for the account.
+        
+        :return: Dictionary containing:
+            - balance: Current balance in Nano
+            - balance_raw: Current balance in raw
+            - receivable_balance: Pending receivable balance in Nano
+            - receivable_balance_raw: Pending receivable balance in raw
         """
         await self.reload()
         return {
