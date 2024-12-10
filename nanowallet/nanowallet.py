@@ -213,16 +213,37 @@ class NanoWallet:
             self.receivable_balance = raw_to_nano(account_info["receivable"])
             self.receivable_balance_raw = int(account_info["receivable"])
 
+    async def _process_block(self, block: Block, operation: str) -> str:
+        """
+        Process a block and handle errors consistently.
+        
+        :param block: The block to process
+        :param operation: Description of the operation (for logging)
+        :return: Hash of the processed block
+        :raises ValueError: If block processing fails
+        """
+        try:
+            response = await self.rpc.process(block.json())
+            raise_error(response)
+            block_hash = response['hash']
+            logger.info(f"Successfully processed {operation}, hash: {block_hash}")
+            return block_hash
+        except Exception as e:
+            logger.error(f"Failed to process {operation}: {str(e)}")
+            raise
+
+
     @handle_errors
     @reload_after
     async def send(self, destination_account: str, amount: float) -> str:
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account ID.
-        :param amount: The amount in Nano. (float precision !!!)
-        :return: The hash of the sent block.
-        :raises ValueError: If the destination account ID is invalid, account not found, or insufficient balance.
+        :param destination_account: The destination account ID
+        :param amount: The amount in Nano (float precision !!!)
+        :return: The hash of the sent block
+        :raises InvalidAccountError: If destination account is invalid
+        :raises InsufficientBalanceError: If insufficient balance
         """
         amount_raw = nano_to_raw(amount)
         response = await self.send_raw(destination_account, amount_raw)
@@ -264,10 +285,7 @@ class NanoWallet:
             destination_account=destination_account
         )
 
-        response = await self.rpc.process(block.json())
-        raise_error(response)
-        logger.info(f"Successfully sent {amount_raw} raw to {destination_account}, hash: {response['hash']}")
-        return response['hash']
+        return await self._process_block(block, f"send of {amount_raw} raw to {destination_account}")
 
     @handle_errors
     @reload_after
@@ -347,17 +365,15 @@ class NanoWallet:
             source_hash=block_hash
         )
 
-        response = await self.rpc.process(block.json())
-        raise_error(response)
+        received_hash = await self._process_block(block, f"receive of {amount_raw} raw from block {block_hash}")
 
         result = {
-            'hash': response['hash'],
+            'hash': received_hash,
             'amount_raw': amount_raw,
             'amount': raw_to_nano(amount_raw),
             'source': send_block_info['block_account']
         }
         
-        logger.info(f"Successfully received {amount_raw} raw from {send_block_info['block_account']}, hash: {response['hash']}")
         return result
 
     @handle_errors
