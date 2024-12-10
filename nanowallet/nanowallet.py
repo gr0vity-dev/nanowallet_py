@@ -5,6 +5,47 @@ from nanorpc.client import NanoRpcTyped
 from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error, raise_error
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
+from dataclasses import dataclass
+
+
+class InsufficientBalanceError(ValueError):
+    """Raised when account has insufficient balance for operation"""
+    pass
+
+
+class InvalidAccountError(ValueError):
+    """Raised when account ID is invalid"""
+    pass
+
+
+class BlockNotFoundError(ValueError):
+    """Raised when block hash cannot be found"""
+    pass
+
+
+class InvalidSeedError(ValueError):
+    """Raised when seed format is invalid"""
+    pass
+
+
+class InvalidIndexError(ValueError):
+    """Raised when account index is invalid"""
+    pass
+
+
+@dataclass
+class WalletConfig:
+    """Configuration for NanoWallet"""
+    use_work_peers: bool = True
+    default_representative: str = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
+
+
+# Constants
+SEED_LENGTH = 64  # Length of hex seed
+MAX_INDEX = 4294967295  # Maximum index value (2^32 - 1)
+ZERO_HASH = "0" * 64
+RAW_PER_NANO = 10 ** 30
+DEFAULT_THRESHOLD = 1
 
 
 class NanoWallet:
@@ -13,25 +54,36 @@ class NanoWallet:
     """
 
     def __init__(self, rpc: NanoRpcTyped, seed: str, index: int,
-                 use_work_peers: bool = True,
-                 default_representative: str = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"):
+                 config: Optional[WalletConfig] = None):
         """
         Initializes the NanoWallet.
 
-        :param rpc: An instance of NanoRpcTyped client.
-        :param seed: The seed of the wallet.
-        :param index: The account index derived from the seed.
-        :param use_work_peers: Whether to use work peers for PoW generation.
-        :param default_representative: defaults to gr0vity's representative node.
+        :param rpc: An instance of NanoRpcTyped client
+        :param seed: The seed of the wallet (64 character hex string)
+        :param index: The account index derived from the seed (0 to 2^32-1)
+        :param config: Optional wallet configuration
+        :raises InvalidSeedError: If seed format is invalid
+        :raises InvalidIndexError: If index is out of valid range
         """
-        self.rpc = rpc
-        self.seed = seed
-        self.index = index
-        self.use_work_peers = use_work_peers
-        self.default_representative = default_representative
+        # Validate seed
+        if not isinstance(seed, str) or len(seed) != SEED_LENGTH or not all(c in '0123456789abcdefABCDEF' for c in seed):
+            raise InvalidSeedError("Seed must be a 64 character hex string")
 
-        self.private_key = generate_account_private_key(seed, index)
+        # Validate index
+        if not isinstance(index, int) or index < 0 or index > MAX_INDEX:
+            raise InvalidIndexError(f"Index must be between 0 and {MAX_INDEX}")
+
+        self.rpc = rpc
+        self.seed = seed.lower()  # Normalize to lowercase
+        self.index = index
+        self.config = config or WalletConfig()
+
+        self.private_key = generate_account_private_key(self.seed, index)
         self.account = get_account_id(private_key=self.private_key)
+        self._init_account_state()
+
+    def _init_account_state(self):
+        """Initialize account state variables"""
         self.balance = 0.0
         self.weight = 0.0
         self.balance_raw = 0
@@ -121,7 +173,7 @@ class NanoWallet:
         :return: The generated work value
         :raises ValueError: If work generation fails
         """
-        response = await self.rpc.work_generate(pow_hash, use_peers=self.use_work_peers)
+        response = await self.rpc.work_generate(pow_hash, use_peers=self.config.use_work_peers)
         raise_error(response)
         return response['work']
 
@@ -175,29 +227,27 @@ class NanoWallet:
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account ID.
-        :param amount_raw: The amount in raw.
-        :return: The hash of the sent block.
+        :param destination_account: The destination account ID
+        :param amount_raw: The amount in raw
+        :return: The hash of the sent block
+        :raises InvalidAccountError: If destination account is invalid
+        :raises InsufficientBalanceError: If insufficient balance
         """
         if not validate_account_id(destination_account):
-            raise ValueError("Invalid destination account ID.")
+            raise InvalidAccountError("Invalid destination account ID.")
 
-        account_info = await self._account_info()
-        if account_not_found(account_info):
-            raise ValueError("Account not found.")
-        if zero_balance(account_info):
-            raise ValueError("Insufficient balance.")
+        params = await self._get_block_params()
+        if params['balance'] == 0:
+            raise InsufficientBalanceError("Insufficient balance.")
 
-        balance = int(account_info["balance"])
-        new_balance = balance - amount_raw
+        new_balance = params['balance'] - amount_raw
         if new_balance < 0:
-            msg = f"""Insufficient funds! balance_raw:{
-                balance} amount_raw:{amount_raw}"""
-            raise ValueError(msg)
+            msg = f"Insufficient funds! balance_raw:{params['balance']} amount_raw:{amount_raw}"
+            raise InsufficientBalanceError(msg)
 
         block = await self._build_block(
-            previous=account_info["frontier"],
-            representative=account_info["representative"],
+            previous=params['previous'],
+            representative=params['representative'],
             balance=new_balance,
             destination_account=destination_account
         )
@@ -208,7 +258,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = None) -> str:
+    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = DEFAULT_THRESHOLD) -> str:
         """
         Transfers all funds from the current account to the destination account.
 
@@ -219,7 +269,7 @@ class NanoWallet:
         :raises ValueError: If the destination account ID is invalid or insufficient balance.
         """
         if not validate_account_id(destination_account):
-            raise ValueError("Invalid destination account ID.")
+            raise InvalidAccountError("Invalid destination account ID.")
 
         if sweep_pending:
             await self.receive_all(threshold_raw=threshold_raw)
@@ -228,7 +278,7 @@ class NanoWallet:
         return response.unwrap()
 
     @handle_errors
-    async def list_receivables(self, threshold_raw: int = None) -> List[tuple]:
+    async def list_receivables(self, threshold_raw: int = DEFAULT_THRESHOLD) -> List[tuple]:
         """
         Lists receivable blocks sorted by descending amount.
 
@@ -271,22 +321,12 @@ class NanoWallet:
         send_block_info = await self._block_info(block_hash)
         amount_raw = int(send_block_info['amount'])
 
-        account_info = await self._account_info()
-        if account_not_found(account_info):
-            # Account is unopened
-            previous = '0' * 64
-            balance = 0
-            representative = self.default_representative
-        else:
-            previous = account_info["frontier"]
-            balance = int(account_info["balance"])
-            representative = account_info["representative"]
-
-        new_balance = balance + amount_raw
+        params = await self._get_block_params()
+        new_balance = params['balance'] + amount_raw
 
         block = await self._build_block(
-            previous=previous,
-            representative=representative,
+            previous=params['previous'],
+            representative=params['representative'],
             balance=new_balance,
             source_hash=block_hash
         )
@@ -396,6 +436,27 @@ class NanoWallet:
                 f"  Account: {self.account}\n"
                 f"  Balance raw: {self.balance_raw} raw\n"
                 f"  Receivable Balance raw: {self.receivable_balance_raw} raw")
+
+    async def _get_block_params(self) -> Dict[str, Any]:
+        """
+        Get common parameters for block creation.
+        
+        :return: Dictionary with previous block hash, balance, and representative
+        :raises ValueError: If account info cannot be retrieved
+        """
+        account_info = await self._account_info()
+        if account_not_found(account_info):
+            return {
+                'previous': ZERO_HASH,
+                'balance': 0,
+                'representative': self.config.default_representative
+            }
+        
+        return {
+            'previous': account_info["frontier"],
+            'balance': int(account_info["balance"]),
+            'representative': account_info["representative"]
+        }
 
 
 class WalletUtils:
