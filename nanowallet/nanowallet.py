@@ -263,9 +263,13 @@ class NanoWallet:
         """
         logger.info(f"Attempting to send {amount_raw} raw to {destination_account}")
         
+        if not destination_account:
+            logger.error(f"Invalid destination account: {destination_account}")
+            raise InvalidAccountError("Destination can't be None")
+        
         if not validate_account_id(destination_account):
             logger.error(f"Invalid destination account: {destination_account}")
-            raise InvalidAccountError("Invalid destination account ID.")
+            raise InvalidAccountError("Invalid destination account.")
 
         params = await self._get_block_params()
         if params['balance'] == 0:
