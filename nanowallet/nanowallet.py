@@ -18,7 +18,7 @@ class InsufficientBalanceError(ValueError):
 
 
 class InvalidAccountError(ValueError):
-    """Raised when account ID is invalid"""
+    """Raised when account is invalid"""
     pass
 
 
@@ -239,7 +239,7 @@ class NanoWallet:
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account ID
+        :param destination_account: The destination account
         :param amount: The amount in Nano (float precision !!!)
         :return: The hash of the sent block
         :raises InvalidAccountError: If destination account is invalid
@@ -255,7 +255,7 @@ class NanoWallet:
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account ID
+        :param destination_account: The destination account
         :param amount_raw: The amount in raw
         :return: The hash of the sent block
         :raises InvalidAccountError: If destination account is invalid
@@ -297,14 +297,14 @@ class NanoWallet:
         """
         Transfers all funds from the current account to the destination account.
 
-        :param destination_account: The account ID to receive the funds.
+        :param destination_account: The account to receive the funds.
         :param sweep_pending: Whether to receive pending blocks before sending.
         :param threshold_raw: Minimum amount to consider for receiving pending blocks (in raw).
         :return: The hash of the sent block.
-        :raises ValueError: If the destination account ID is invalid or insufficient balance.
+        :raises ValueError: If the destination account is invalid or insufficient balance.
         """
         if not validate_account_id(destination_account):
-            raise InvalidAccountError("Invalid destination account ID.")
+            raise InvalidAccountError("Invalid destination account.")
 
         if sweep_pending:
             await self.receive_all(threshold_raw=threshold_raw)
