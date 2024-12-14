@@ -34,7 +34,9 @@ def nano_to_raw(amount_nano: float) -> int:
 
 
 def raw_to_nano(raw_amount: int) -> float:
-    return int(raw_amount) / (10 ** 30)
+    # Convert to float with full precision first
+    full_precision = int(raw_amount) / (10 ** 30)
+    return round(full_precision, 6)
 
 
 # DECORATORS
