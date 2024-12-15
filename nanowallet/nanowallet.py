@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
-from .rpc_errors import account_not_found, zero_balance, block_not_found, no_error, get_error, raise_error
+from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
@@ -10,31 +10,6 @@ import logging
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-
-class InsufficientBalanceError(ValueError):
-    """Raised when account has insufficient balance for operation"""
-    pass
-
-
-class InvalidAccountError(ValueError):
-    """Raised when account is invalid"""
-    pass
-
-
-class BlockNotFoundError(ValueError):
-    """Raised when block hash cannot be found"""
-    pass
-
-
-class InvalidSeedError(ValueError):
-    """Raised when seed format is invalid"""
-    pass
-
-
-class InvalidIndexError(ValueError):
-    """Raised when account index is invalid"""
-    pass
 
 
 @dataclass
@@ -48,8 +23,7 @@ class WalletConfig:
 SEED_LENGTH = 64  # Length of hex seed
 MAX_INDEX = 4294967295  # Maximum index value (2^32 - 1)
 ZERO_HASH = "0" * 64
-RAW_PER_NANO = 10 ** 30
-DEFAULT_THRESHOLD = 1
+DEFAULT_THRESHOLD_RAW = 1
 
 
 class NanoWallet:
@@ -169,7 +143,7 @@ class NanoWallet:
         :raises ValueError: If block is not found or RPC returns an error
         """
         response = await self.rpc.blocks_info([block_hash], source=True, receive_hash=True, json_block=True)
-        raise_error(response, more=f" {block_hash}")
+        RpcError().raise_error(response, more=f" {block_hash}")
         return response['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
@@ -181,7 +155,7 @@ class NanoWallet:
         :raises ValueError: If work generation fails
         """
         response = await self.rpc.work_generate(pow_hash, use_peers=self.config.use_work_peers)
-        raise_error(response)
+        RpcError().raise_error(response)
         return response['work']
 
     @handle_errors
@@ -190,16 +164,16 @@ class NanoWallet:
         Reloads the wallet's account information and receivable blocks.
         """
         response = await self.rpc.receivable(self.account, threshold=1)
-        raise_error(response)
+        RpcError().raise_error(response)
 
         self.receivable_blocks = response["blocks"]
         account_info = await self._account_info()
-        if account_not_found(account_info) and self.receivable_blocks:
+        if RpcError().account_not_found(account_info) and self.receivable_blocks:
             # New account with receivable blocks
             self.receivable_balance_raw = sum(
                 int(amount) for amount in self.receivable_blocks.values())
             self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
-        elif no_error(account_info):
+        elif RpcError().no_error(account_info):
             self.balance = raw_to_nano(account_info["balance"])
             self.balance_raw = int(account_info["balance"])
             self.frontier_block = account_info["frontier"]
@@ -224,7 +198,7 @@ class NanoWallet:
         """
         try:
             response = await self.rpc.process(block.json())
-            raise_error(response)
+            RpcError().raise_error(response)
             block_hash = response['hash']
             logger.info(f"Successfully processed {operation}, hash: {block_hash}")
             return block_hash
@@ -293,7 +267,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = DEFAULT_THRESHOLD) -> str:
+    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> str:
         """
         Transfers all funds from the current account to the destination account.
 
@@ -313,7 +287,7 @@ class NanoWallet:
         return response.unwrap()
 
     @handle_errors
-    async def list_receivables(self, threshold_raw: int = DEFAULT_THRESHOLD) -> List[tuple]:
+    async def list_receivables(self, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> List[tuple]:
         """
         Lists receivable blocks sorted by descending amount.
 
@@ -481,7 +455,7 @@ class NanoWallet:
         :raises ValueError: If account info cannot be retrieved
         """
         account_info = await self._account_info()
-        if account_not_found(account_info):
+        if RpcError().account_not_found(account_info):
             logger.debug(f"Account {self.account} not found, using default parameters")
             return {
                 'previous': ZERO_HASH,
