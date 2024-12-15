@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
-from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException
+from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount, nano_to_raw_short
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
 import logging
+from decimal import Decimal
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -45,7 +46,8 @@ class NanoWallet:
         """
         # Validate seed
         if not isinstance(seed, str) or len(seed) != SEED_LENGTH or not all(c in '0123456789abcdefABCDEF' for c in seed):
-            logger.error(f"Invalid seed format provided: length={len(seed) if isinstance(seed, str) else 'N/A'}")
+            logger.error(
+                f"Invalid seed format provided: length={len(seed) if isinstance(seed, str) else 'N/A'}")
             raise InvalidSeedError("Seed must be a 64 character hex string")
 
         # Validate index
@@ -60,16 +62,17 @@ class NanoWallet:
 
         self.private_key = generate_account_private_key(self.seed, index)
         self.account = get_account_id(private_key=self.private_key)
-        logger.info(f"Initialized wallet for account {self.account} with index {index}")
+        logger.info(
+            f"Initialized wallet for account {self.account} with index {index}")
         self._init_account_state()
 
     def _init_account_state(self):
         """Initialize account state variables"""
-        self.balance = 0.0
-        self.weight = 0.0
+        self.balance = Decimal('0.0')
+        self.weight = Decimal('0.0')
         self.balance_raw = 0
         self.weight_raw = 0
-        self.receivable_balance = 0.0
+        self.receivable_balance = Decimal('0.0')
         self.receivable_balance_raw = 0
         self.confirmation_height = 0
         self.block_count = 0
@@ -85,7 +88,7 @@ class NanoWallet:
                            source_hash: Optional[str] = None, destination_account: Optional[str] = None) -> Block:
         """
         Builds a state block with the given parameters.
-        
+
         :param previous: Previous block hash or zeros for first block
         :param representative: Representative account
         :param balance: Account balance after this block
@@ -128,7 +131,7 @@ class NanoWallet:
     async def _account_info(self) -> Dict[str, Any]:
         """
         Get account information from the RPC.
-        
+
         :return: Dictionary containing account information including balance, representative, etc.
         """
         response = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
@@ -137,7 +140,7 @@ class NanoWallet:
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
         """
         Get information about a specific block.
-        
+
         :param block_hash: The hash of the block to get information about
         :return: Dictionary containing block information
         :raises ValueError: If block is not found or RPC returns an error
@@ -149,7 +152,7 @@ class NanoWallet:
     async def _generate_work(self, pow_hash: str) -> str:
         """
         Generate proof of work for a block.
-        
+
         :param pow_hash: The hash to generate work for
         :return: The generated work value
         :raises ValueError: If work generation fails
@@ -190,7 +193,7 @@ class NanoWallet:
     async def _process_block(self, block: Block, operation: str) -> str:
         """
         Process a block and handle errors consistently.
-        
+
         :param block: The block to process
         :param operation: Description of the operation (for logging)
         :return: Hash of the processed block
@@ -200,26 +203,34 @@ class NanoWallet:
             response = await self.rpc.process(block.json())
             RpcError().raise_error(response)
             block_hash = response['hash']
-            logger.info(f"Successfully processed {operation}, hash: {block_hash}")
+            logger.info(
+                f"Successfully processed {operation}, hash: {block_hash}")
             return block_hash
         except Exception as e:
             logger.error(f"Failed to process {operation}: {str(e)}")
             raise
 
-
     @handle_errors
     @reload_after
-    async def send(self, destination_account: str, amount: float) -> str:
+    async def send(self, destination_account: str, amount: Decimal | str | int) -> str:
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account
-        :param amount: The amount in Nano (float precision !!!)
-        :return: The hash of the sent block
-        :raises InvalidAccountError: If destination account is invalid
-        :raises InsufficientBalanceError: If insufficient balance
+        Args:
+            destination_account: The destination account
+            amount: The amount in Nano (as Decimal, string, or int)
+
+        Returns:
+            str: The hash of the sent block
+
+        Raises:
+            TypeError: If amount is float or invalid type
+            ValueError: If amount is negative or invalid format
+            InvalidAccountError: If destination account is invalid
+            InsufficientBalanceError: If insufficient balance
         """
-        amount_raw = nano_to_raw(amount)
+        amount_decimal = validate_nano_amount(amount)
+        amount_raw = nano_to_raw(amount_decimal)
         response = await self.send_raw(destination_account, amount_raw)
         return response.unwrap()
 
@@ -235,24 +246,27 @@ class NanoWallet:
         :raises InvalidAccountError: If destination account is invalid
         :raises InsufficientBalanceError: If insufficient balance
         """
-        logger.info(f"Attempting to send {amount_raw} raw to {destination_account}")
-        
+        logger.info(
+            f"Attempting to send {amount_raw} raw to {destination_account}")
+
         if not destination_account:
             logger.error(f"Invalid destination account: {destination_account}")
             raise InvalidAccountError("Destination can't be None")
-        
+
         if not validate_account_id(destination_account):
             logger.error(f"Invalid destination account: {destination_account}")
             raise InvalidAccountError("Invalid destination account.")
 
         params = await self._get_block_params()
         if params['balance'] == 0:
-            logger.error(f"Insufficient balance for send: balance=0 amount={amount_raw}")
+            logger.error(
+                f"Insufficient balance for send: balance=0 amount={amount_raw}")
             raise InsufficientBalanceError("Insufficient balance.")
 
         new_balance = params['balance'] - amount_raw
         if new_balance < 0:
-            logger.error(f"Insufficient balance for send: balance={params['balance']} amount={amount_raw}")
+            logger.error(
+                f"Insufficient balance for send: balance={params['balance']} amount={amount_raw}")
             msg = f"Insufficient funds! balance_raw:{params['balance']} amount_raw:{amount_raw}"
             raise InsufficientBalanceError(msg)
 
@@ -328,7 +342,7 @@ class NanoWallet:
         :raises ValueError: If the block is not found.
         """
         logger.info(f"Attempting to receive block {block_hash}")
-        
+
         send_block_info = await self._block_info(block_hash)
         amount_raw = int(send_block_info['amount'])
         logger.debug(f"Block {block_hash} contains {amount_raw} raw")
@@ -351,7 +365,7 @@ class NanoWallet:
             'amount': raw_to_nano(amount_raw),
             'source': send_block_info['block_account']
         }
-        
+
         return result
 
     @handle_errors
@@ -413,7 +427,7 @@ class NanoWallet:
     async def balance_info(self) -> dict:
         """
         Get detailed balance information for the account.
-        
+
         :return: Dictionary containing:
             - balance: Current balance in Nano
             - balance_raw: Current balance in raw
@@ -450,20 +464,22 @@ class NanoWallet:
     async def _get_block_params(self) -> Dict[str, Any]:
         """
         Get common parameters for block creation.
-        
+
         :return: Dictionary with previous block hash, balance, and representative
         :raises ValueError: If account info cannot be retrieved
         """
         account_info = await self._account_info()
         if RpcError().account_not_found(account_info):
-            logger.debug(f"Account {self.account} not found, using default parameters")
+            logger.debug(
+                f"Account {self.account} not found, using default parameters")
             return {
                 'previous': ZERO_HASH,
                 'balance': 0,
                 'representative': self.config.default_representative
             }
-        
-        logger.debug(f"Retrieved block params for {self.account}: balance={account_info['balance']}")
+
+        logger.debug(
+            f"Retrieved block params for {self.account}: balance={account_info['balance']}")
         return {
             'previous': account_info["frontier"],
             'balance': int(account_info["balance"]),
@@ -474,32 +490,46 @@ class NanoWallet:
 class WalletUtils:
 
     @staticmethod
-    def raw_to_nano(amount_raw: int) -> float:
+    def raw_to_nano(amount_raw: int) -> Decimal:
         """
         Converts raw amount to Nano.
 
-        :param amount_raw: The amount in raw.
-        :return: The amount in Nano.
+        Args:
+            amount_raw: The amount in raw
+
+        Returns:
+            Decimal: The amount in Nano
         """
         return raw_to_nano(amount_raw)
 
     @staticmethod
-    def nano_to_raw(amount_nano: float) -> int:
+    def nano_to_raw(amount_nano: Decimal | str | int) -> int:
         """
         Converts Nano amount to raw amount.
 
-        :param amount_nano: The amount in Nano.
-        :return: The amount in raw.
+        Args:
+            amount_nano: The amount in Nano (as Decimal, string, or int)
+
+        Returns:
+            int: The amount in raw
+
+        Raises:
+            TypeError: If amount is float or invalid type
+            ValueError: If amount is negative or invalid format
         """
-        return nano_to_raw(amount_nano)
+        amount_decimal = validate_nano_amount(amount_nano)
+        return nano_to_raw_short(amount_decimal)
 
     @staticmethod
     def sum_received_amount(receive_all_response: List[dict]) -> dict:
         """
         Sums the amount_raw values from a list of receivable responses.
 
-        :param receive_all_response: A list of dictionaries containing 'amount_raw'.
-        :return: A dictionary with the total amount in raw and Nano.
+        Args:
+            receive_all_response: A list of dictionaries containing 'amount_raw'
+
+        Returns:
+            dict: A dictionary with the total amount in raw and Nano
         """
         total_amount_raw = sum(int(item['amount_raw'])
                                for item in receive_all_response)

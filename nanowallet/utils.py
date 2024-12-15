@@ -19,20 +19,21 @@ RAW_PER_NANO = Decimal('10') ** 30
 def nano_to_raw_short(amount: Decimal | str) -> int:
     # Convert to Decimal and round to 6 decimal places
     amount_decimal = Decimal(str(amount))
-    truncated = amount_decimal.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+    truncated = amount_decimal.quantize(
+        Decimal('0.000001'), rounding=ROUND_DOWN)
     return nano_to_raw(truncated)
-    
+
 
 def nano_to_raw(amount_nano: Decimal | str) -> int:
     """
     Converts Nano amount to raw.
-    
+
     Args:
         amount_nano: Amount in NANO as Decimal or string
-        
+
     Returns:
         int: Amount in raw units
-        
+
     Raises:
         ValueError: If amount is negative or invalid, or has more than 30 decimal places
     """
@@ -45,7 +46,8 @@ def nano_to_raw(amount_nano: Decimal | str) -> int:
         raise ValueError("NANO amount cannot be negative")
 
     # Convert to normalized string without scientific notation
-    amount_str = format(amount_decimal, 'f')  # 'f' format forces fixed-point notation
+    # 'f' format forces fixed-point notation
+    amount_str = format(amount_decimal, 'f')
 
     if '.' in amount_str:
         whole, fraction = amount_str.split('.')
@@ -64,9 +66,40 @@ def nano_to_raw(amount_nano: Decimal | str) -> int:
 
 
 def raw_to_nano(raw_amount: int) -> Decimal:
-    return Decimal(str(raw_amount)) / RAW_PER_NANO    
+    return Decimal(str(raw_amount)) / RAW_PER_NANO
+
+
+def validate_nano_amount(amount: Decimal | str | int) -> Decimal:
+    """
+    Validates and converts an amount to Decimal.
+
+    Args:
+        amount: Amount in NANO as Decimal, string, or int
+
+    Returns:
+        Decimal: The validated amount
+
+    Raises:
+        TypeError: If amount is float or invalid type
+        ValueError: If amount is negative or invalid format
+    """
+    if isinstance(amount, float):
+        raise TypeError(
+            "Float values are not allowed for NANO amounts - use Decimal or string to maintain precision")
+
+    if not isinstance(amount, (Decimal, str, int)):
+        raise TypeError(f"Invalid type for NANO amount: {type(amount)}")
+
+    try:
+        amount_decimal = Decimal(str(amount))
+        if amount_decimal < 0:
+            raise ValueError("NANO amount cannot be negative")
+        return amount_decimal
+    except decimal.InvalidOperation:
+        raise ValueError(f"Invalid NANO amount format: {amount}")
 
 # DECORATORS
+
 
 def reload_after(func: Callable) -> Callable:
     @functools.wraps(func)
