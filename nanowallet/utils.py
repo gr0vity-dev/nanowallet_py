@@ -69,6 +69,11 @@ def raw_to_nano(raw_amount: int) -> Decimal:
     return Decimal(str(raw_amount)) / RAW_PER_NANO
 
 
+def raw_to_nano_short(raw_amount: int) -> Decimal:
+    nano_amount = Decimal(str(raw_amount)) / RAW_PER_NANO
+    return nano_amount.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+
+
 def validate_nano_amount(amount: Decimal | str | int) -> Decimal:
     """
     Validates and converts an amount to Decimal.

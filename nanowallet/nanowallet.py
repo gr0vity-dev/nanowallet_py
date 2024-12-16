@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
-from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount, nano_to_raw_short
+from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount, raw_to_nano_short
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
 import logging
@@ -492,15 +492,15 @@ class WalletUtils:
     @staticmethod
     def raw_to_nano(amount_raw: int) -> Decimal:
         """
-        Converts raw amount to Nano.
+        Converts raw amount to Nano, truncating to 6 decimal places.
 
         Args:
-            amount_raw: The amount in raw
+            raw_amount: Amount in raw units
 
         Returns:
-            Decimal: The amount in Nano
+            Decimal: Amount in NANO, truncated to 6 decimal places
         """
-        return raw_to_nano(amount_raw)
+        return raw_to_nano_short(amount_raw)
 
     @staticmethod
     def nano_to_raw(amount_nano: Decimal | str | int) -> int:
@@ -518,7 +518,7 @@ class WalletUtils:
             ValueError: If amount is negative or invalid format
         """
         amount_decimal = validate_nano_amount(amount_nano)
-        return nano_to_raw_short(amount_decimal)
+        return nano_to_raw(amount_decimal)
 
     @staticmethod
     def sum_received_amount(receive_all_response: List[dict]) -> dict:
