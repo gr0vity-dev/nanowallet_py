@@ -16,12 +16,45 @@ getcontext().prec = 40
 RAW_PER_NANO = Decimal('10') ** 30
 
 
-def nano_to_raw_short(amount: Decimal | str) -> int:
-    # Convert to Decimal and round to 6 decimal places
+def nano_to_raw_short(amount: Decimal | str, decimal_places: int = 6) -> int:
+    """
+    Converts Nano amount to raw, truncating to specified decimal places.
+
+    Args:
+        amount: Amount in NANO as Decimal or string
+        decimal_places: Number of decimal places to keep (default: 6)
+
+    Returns:
+        int: Amount in raw units, truncated to equivalent decimal places in NANO
+
+    Raises:
+        ValueError: If decimal_places is negative or greater than 30
+    """
+    if not isinstance(decimal_places, int):
+        raise TypeError("decimal_places must be an integer")
+    if decimal_places < 0:
+        raise ValueError("decimal_places cannot be negative")
+    if decimal_places > 30:
+        raise ValueError("decimal_places cannot exceed 30")
+
+    # Convert to Decimal and format to fixed-point notation
     amount_decimal = Decimal(str(amount))
-    truncated = amount_decimal.quantize(
-        Decimal('0.000001'), rounding=ROUND_DOWN)
-    return nano_to_raw(truncated)
+    amount_str = format(amount_decimal, 'f')
+
+    # Split into whole and fractional parts
+    if '.' in amount_str:
+        whole, fraction = amount_str.split('.')
+        # Truncate fraction to specified decimal places
+        fraction = fraction[:decimal_places].ljust(decimal_places, '0')
+    else:
+        whole = amount_str
+        fraction = '0' * decimal_places
+
+    # Reconstruct the truncated decimal
+    truncated_str = f"{whole}.{fraction}"
+    truncated_decimal = Decimal(truncated_str)
+
+    return nano_to_raw(truncated_decimal)
 
 
 def nano_to_raw(amount_nano: Decimal | str) -> int:
