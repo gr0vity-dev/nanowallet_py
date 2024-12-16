@@ -8,8 +8,8 @@ setup(
     version='0.0.14',
     packages=find_packages(),
     install_requires=[
-        'nano_lib_py',
-        'nanorpc',
+        'nano_lib_py==0.5.1',
+        'nanorpc==0.1.7',
     ],
     python_requires='>=3.7',
     author='gr0vity',
