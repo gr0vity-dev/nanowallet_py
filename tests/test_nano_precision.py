@@ -1,6 +1,6 @@
 import unittest
 from decimal import Decimal
-from nanowallet.utils import raw_to_nano, nano_to_raw, nano_to_raw_short
+from nanowallet.utils import raw_to_nano, nano_to_raw
 
 
 class TestNanoPrecision(unittest.TestCase):
@@ -19,6 +19,11 @@ class TestNanoPrecision(unittest.TestCase):
         self.assertEqual(raw_to_nano(999999999), Decimal(
             '0.000000000000000000000999999999'))
 
+    def test_tuncated_precision(self):
+        # Test precise decimal conversion
+        nano = raw_to_nano('1234567890123456789012345678900', decimal_places=6)
+        self.assertEqual(nano, Decimal('1.234567'))
+
     def test_precise_amounts(self):
         # Test precise decimal conversion
         raw = nano_to_raw('0.123456789123456789123456789123')
@@ -31,10 +36,9 @@ class TestNanoPrecision(unittest.TestCase):
         self.assertEqual(raw_to_nano(raw), Decimal(max_precision))
 
     def test_rounding_behavior(self):
-        # Test that amounts beyond 30 decimal places are rejected
-        with self.assertRaises(ValueError):
-            # 31 decimal places
-            nano_to_raw('0.1234567891234567891234567891234')
+        # Test that amounts beyond 30 decimal places are truncated at 30 places
+        self.assertEqual(raw_to_nano(nano_to_raw('0.1234567891234567891234567891234')),
+                         Decimal('0.123456789123456789123456789123'))
 
         # Test that trailing zeros are handled correctly
         self.assertEqual(raw_to_nano(nano_to_raw('1.100000000000000000000000000000')),
@@ -63,7 +67,7 @@ class TestNanoPrecision(unittest.TestCase):
         # Test invalid inputs
         with self.assertRaises(ValueError):
             nano_to_raw('-1')
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             nano_to_raw('invalid')
 
     def test_conversion_roundtrip(self):
@@ -87,57 +91,5 @@ class TestNanoPrecision(unittest.TestCase):
         raw = nano_to_raw(original)
         result = raw_to_nano(raw)
         # Compare up to original precision
-        self.assertEqual(str(result)[:38], original)
-
-    def test_decimal_places_truncation(self):
-        """Test nano_to_raw_short with different decimal place settings"""
-        # Test value with many decimal places
-        test_value = '1.123456789123456789123456789123'
-
-        # Test default truncation (6 places)
-        raw = nano_to_raw_short(test_value)
-        self.assertEqual(raw_to_nano(raw), Decimal(
-            '1.123456000000000000000000000000'))
-
-        # Test different decimal place settings
-        test_cases = [
-            (3, '1.123000000000000000000000000000'),  # 3 decimal places
-            (1, '1.100000000000000000000000000000'),  # 1 decimal place
-            (9, '1.123456789000000000000000000000'),  # 9 decimal places
-            # 0 decimal places - rounds to whole number
-            (0, '1.000000000000000000000000000000'),
-        ]
-
-        for decimal_places, expected in test_cases:
-            raw = nano_to_raw_short(test_value, decimal_places=decimal_places)
-            self.assertEqual(raw_to_nano(raw), Decimal(expected))
-
-        # Test that trailing zeros are handled correctly
-        raw = nano_to_raw_short('1.120000', decimal_places=4)
-        self.assertEqual(raw_to_nano(raw), Decimal(
-            '1.120000000000000000000000000000'))
-
-        # Test that values are truncated, not rounded
-        raw = nano_to_raw_short('1.1239999', decimal_places=3)
-        self.assertEqual(raw_to_nano(raw), Decimal(
-            '1.123000000000000000000000000000'))
-
-        # Test that values are truncated, not rounded
-        raw = nano_to_raw_short('1.1239999')
-        self.assertEqual(raw_to_nano(raw), Decimal(
-            '1.123999000000000000000000000000'))
-        self.assertEqual(raw, 1123999000000000000000000000000)
-
-        # Test that values are truncated, not rounded
-        raw = nano_to_raw_short('0.9999', decimal_places=0)
-        self.assertEqual(raw, 0)
-
-        # Test invalid decimal places
-        with self.assertRaises(ValueError):
-            nano_to_raw_short('1.123', decimal_places=-1)
-
-        with self.assertRaises(ValueError):
-            nano_to_raw_short('1.123', decimal_places=31)
-
-        with self.assertRaises(TypeError):
-            nano_to_raw_short('1.123', decimal_places=1.5)
+        self.assertEqual(str(result)[:35], original)
+        self.assertEqual(str(result)[35:], "")

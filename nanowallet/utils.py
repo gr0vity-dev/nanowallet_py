@@ -3,108 +3,62 @@ import functools
 from typing import TypeVar, Callable, Awaitable
 from dataclasses import dataclass
 import logging
-from decimal import Decimal, ROUND_DOWN, getcontext
+from decimal import Decimal, ROUND_DOWN
 import decimal
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Set precision for Decimal - allowing for 133 million (9 digits) plus 30 decimal places
-getcontext().prec = 40
-
 RAW_PER_NANO = Decimal('10') ** 30
 
 
-def nano_to_raw_short(amount: Decimal | str, decimal_places: int = 6) -> int:
+def raw_to_nano(raw_amount, decimal_places=30):
     """
-    Converts Nano amount to raw, truncating to specified decimal places.
+    Convert raw amount to nano with configurable decimal places precision
+    1 nano = 10^30 raw
 
     Args:
-        amount: Amount in NANO as Decimal or string
-        decimal_places: Number of decimal places to keep (default: 6)
-
-    Returns:
-        int: Amount in raw units, truncated to equivalent decimal places in NANO
-
-    Raises:
-        ValueError: If decimal_places is negative or greater than 30
+        raw_amount: The raw amount to convert
+        decimal_places: Number of decimal places to keep (default: 30)
     """
-    if not isinstance(decimal_places, int):
-        raise TypeError("decimal_places must be an integer")
-    if decimal_places < 0:
-        raise ValueError("decimal_places cannot be negative")
-    if decimal_places > 30:
-        raise ValueError("decimal_places cannot exceed 30")
+    # Convert to Decimal for precise calculation
+    raw_decimal = Decimal(str(raw_amount))
+    nano_amount = raw_decimal / Decimal('1000000000000000000000000000000')
 
-    # Convert to Decimal and format to fixed-point notation
-    amount_decimal = Decimal(str(amount))
-    amount_str = format(amount_decimal, 'f')
+    # Convert to string with full precision
+    # Use 'f' format to avoid scientific notation
+    nano_str = format(nano_amount, 'f')
 
-    # Split into whole and fractional parts
-    if '.' in amount_str:
-        whole, fraction = amount_str.split('.')
-        # Truncate fraction to specified decimal places
-        fraction = fraction[:decimal_places].ljust(decimal_places, '0')
+    # Split into integer and decimal parts
+    if '.' in nano_str:
+        int_part, dec_part = nano_str.split('.')
+        # Truncate decimal part to specified places
+        dec_part = dec_part[:decimal_places]
+        # Pad with zeros if needed
+        dec_part = dec_part.ljust(decimal_places, '0')
+        # Recombine
+        truncated_str = f"{int_part}.{dec_part}"
     else:
-        whole = amount_str
-        fraction = '0' * decimal_places
+        # Handle whole numbers
+        truncated_str = f"{nano_str}.{'0' * decimal_places}"
 
-    # Reconstruct the truncated decimal
-    truncated_str = f"{whole}.{fraction}"
-    truncated_decimal = Decimal(truncated_str)
-
-    return nano_to_raw(truncated_decimal)
+    # Convert back to Decimal using the string
+    return Decimal(truncated_str.rstrip('0').rstrip('.') if '.' in truncated_str else truncated_str)
 
 
-def nano_to_raw(amount_nano: Decimal | str) -> int:
+def nano_to_raw(nano_amount):
     """
-    Converts Nano amount to raw.
-
-    Args:
-        amount_nano: Amount in NANO as Decimal or string
-
-    Returns:
-        int: Amount in raw units
-
-    Raises:
-        ValueError: If amount is negative or invalid, or has more than 30 decimal places
+    Convert nano amount to raw
+    1 nano = 10^30 raw
     """
-    try:
-        amount_decimal = Decimal(str(amount_nano))
-    except (decimal.InvalidOperation, TypeError):
-        raise ValueError(f"Invalid NANO amount: {amount_nano}")
-
-    if amount_decimal < 0:
-        raise ValueError("NANO amount cannot be negative")
-
-    # Convert to normalized string without scientific notation
-    # 'f' format forces fixed-point notation
-    amount_str = format(amount_decimal, 'f')
-
-    if '.' in amount_str:
-        whole, fraction = amount_str.split('.')
-    else:
-        whole, fraction = amount_str, ''
-
-    if len(fraction) > 30:
-        raise ValueError("NANO amount has more than 30 decimal places")
-
-    whole = whole.lstrip('0') or '0'
-    fraction = fraction.ljust(30, '0')
-    raw_str = whole + fraction
-    raw_str = raw_str.lstrip('0') or '0'
-
-    return int(raw_str)
-
-
-def raw_to_nano(raw_amount: int) -> Decimal:
-    return Decimal(str(raw_amount)) / RAW_PER_NANO
-
-
-def raw_to_nano_short(raw_amount: int) -> Decimal:
-    nano_amount = Decimal(str(raw_amount)) / RAW_PER_NANO
-    return nano_amount.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+    # Convert to Decimal for precise calculation
+    nano_decimal = Decimal(str(nano_amount))
+    if nano_decimal < 0:
+        raise ValueError("Negative values are not allowed")
+    raw_amount = nano_decimal * Decimal('1000000000000000000000000000000')
+    # Return as integer
+    return int(raw_amount)
 
 
 def validate_nano_amount(amount: Decimal | str | int) -> Decimal:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
-from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount, raw_to_nano_short
+from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
 import logging
@@ -500,7 +500,7 @@ class WalletUtils:
         Returns:
             Decimal: Amount in NANO, truncated to 6 decimal places
         """
-        return raw_to_nano_short(amount_raw)
+        return raw_to_nano(amount_raw, decimal_places=6)
 
     @staticmethod
     def nano_to_raw(amount_nano: Decimal | str | int) -> int:

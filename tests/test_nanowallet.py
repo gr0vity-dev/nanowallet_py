@@ -107,7 +107,8 @@ async def test_reload_unopened(mock_rpc, seed, index):
     assert wallet.block_count == 0
     assert wallet.weight == 0
     assert wallet.weight_raw == 0
-    assert wallet.receivable_balance == Decimal('4.000000000000000000000000000001')
+    assert wallet.receivable_balance == Decimal(
+        '4.000000000000000000000000000001')
     assert wallet.receivable_balance_raw == 4000000000000000000000000000001
     assert wallet.receivable_blocks == {
         "b1": "1000000000000000000000000000000", "b2": "1", "b3": "3000000000000000000000000000000"}
