@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
-from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, NanoException, validate_nano_amount
+from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, validate_nano_amount, NanoResult
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
 import logging
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WalletConfig:
     """Configuration for NanoWallet"""
-    use_work_peers: bool = True
+    use_work_peers: bool = False
     default_representative: str = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
 
 
@@ -212,7 +212,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def send(self, destination_account: str, amount: Decimal | str | int) -> str:
+    async def send(self, destination_account: str, amount: Decimal | str | int) -> NanoResult[str]:
         """
         Sends Nano to a destination account.
 
@@ -236,7 +236,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def send_raw(self, destination_account: str, amount_raw: int) -> str:
+    async def send_raw(self, destination_account: str, amount_raw: int) -> NanoResult[str]:
         """
         Sends Nano to a destination account.
 
@@ -281,7 +281,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> str:
+    async def sweep(self, destination_account: str, sweep_pending: bool = True, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> NanoResult[str]:
         """
         Transfers all funds from the current account to the destination account.
 
@@ -301,7 +301,7 @@ class NanoWallet:
         return response.unwrap()
 
     @handle_errors
-    async def list_receivables(self, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> List[tuple]:
+    async def list_receivables(self, threshold_raw: int = DEFAULT_THRESHOLD_RAW) -> NanoResult[List[tuple]]:
         """
         Lists receivable blocks sorted by descending amount.
 
@@ -333,7 +333,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def receive_by_hash(self, block_hash: str) -> dict:
+    async def receive_by_hash(self, block_hash: str) -> NanoResult[dict]:
         """
         Receives a specific block by its hash.
 
@@ -370,7 +370,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def receive_all(self, threshold_raw: float = None) -> list:
+    async def receive_all(self, threshold_raw: float = None) -> NanoResult[list]:
         """
         Receives all pending receivable blocks.
         :return: A list of dictionary with information about each received block.
@@ -386,7 +386,7 @@ class NanoWallet:
         return block_results
 
     @handle_errors
-    async def refund_first_sender(self) -> str:
+    async def refund_first_sender(self) -> NanoResult[str]:
         """
         Sends remaining funds to the account opener.
 
@@ -411,7 +411,7 @@ class NanoWallet:
         return result
 
     @handle_errors
-    async def has_balance(self) -> bool:
+    async def has_balance(self) -> NanoResult[bool]:
         """
         Checks if the account has available balance or receivable balance.
 
@@ -424,7 +424,7 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def balance_info(self) -> dict:
+    async def balance_info(self) -> NanoResult[dict]:
         """
         Get detailed balance information for the account.
 
