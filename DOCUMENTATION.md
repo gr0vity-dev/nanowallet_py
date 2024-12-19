@@ -49,9 +49,9 @@ async def balance_info() -> NanoResult[dict]
 Returns detailed balance information:
 ```python
 {
-    "balance": float,  # Balance in NANO
+    "balance": Decimal,  # Balance in NANO
     "balance_raw": int,  # Balance in raw
-    "receivable_balance": float,  # Pending balance in NANO
+    "receivable_balance": Decimal,  # Pending balance in NANO
     "receivable_balance_raw": int  # Pending balance in raw
 }
 ```
@@ -66,7 +66,7 @@ Checks if account has any available or receivable balance.
 
 #### send()
 ```python
-async def send(destination_account: str, amount: float) -> NanoResult[str]
+async def send(destination_account: str, amount: Decimal | str | int) -> NanoResult[str]
 ```
 Sends NANO to a destination account.
 - `destination_account`: Recipient's account address
@@ -85,7 +85,7 @@ Sends raw amount to a destination account.
 async def sweep(
     destination_account: str, 
     sweep_pending: bool = True, 
-    threshold_raw: int = DEFAULT_THRESHOLD
+    threshold_raw: int = DEFAULT_THRESHOLD_RAW
 ) -> NanoResult[str]
 ```
 Transfers all funds to destination account.
@@ -96,7 +96,7 @@ Transfers all funds to destination account.
 
 #### receive_all()
 ```python
-async def receive_all(threshold_raw: float = None) -> NanoResult[list]
+async def receive_all(threshold_raw: int = None) -> NanoResult[list]
 ```
 Receives all pending blocks.
 - Returns: List of received block information
@@ -111,7 +111,7 @@ Returns:
 {
     'hash': str,  # Received block hash
     'amount_raw': int,  # Amount in raw
-    'amount': float,  # Amount in NANO
+    'amount': Decimal,  # Amount in NANO
     'source': str  # Sender's account
 }
 ```
@@ -150,19 +150,13 @@ All methods return a `NanoResult` object with the following properties:
 
 ## Utility Functions
 
-### WalletUtils
+### WalletUtils / Conversion Functions
 Static utility methods for common conversions:
 
 ```python
-WalletUtils.raw_to_nano(amount_raw: int) -> float
-WalletUtils.nano_to_raw(amount_nano: float) -> int
+WalletUtils.raw_to_nano(amount_raw: int) -> Decimal
+WalletUtils.nano_to_raw(amount_nano: Decimal | str | int) -> int
 WalletUtils.sum_received_amount(receive_all_response: List[dict]) -> dict
-```
-
-### Conversion Functions
-```python
-raw_to_nano(raw_amount: int) -> float
-nano_to_raw(amount_nano: float) -> int
 ```
 
 ## Usage Example
