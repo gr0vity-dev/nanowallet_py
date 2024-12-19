@@ -1,6 +1,7 @@
 import unittest
 from decimal import Decimal
 from nanowallet.utils import raw_to_nano, nano_to_raw
+from nanowallet.errors import InvalidAmountError
 
 
 class TestNanoPrecision(unittest.TestCase):
@@ -65,7 +66,7 @@ class TestNanoPrecision(unittest.TestCase):
         self.assertEqual(nano_to_raw('1'), 10**30)
 
         # Test invalid inputs
-        with self.assertRaises(ValueError):
+        with self.assertRaises(InvalidAmountError):
             nano_to_raw('-1')
         with self.assertRaises(Exception):
             nano_to_raw('invalid')

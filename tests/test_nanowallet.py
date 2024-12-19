@@ -640,7 +640,7 @@ async def test_refund_first_sender_no_account(mock_rpc, seed, index):
     response = await wallet.refund_first_sender()
 
     assert response.success == False
-    assert response.error == "No funds available to refund."
+    assert response.error == "Insufficient balance. No funds available to refund."
 
 
 @pytest.mark.asyncio
@@ -664,7 +664,7 @@ async def test_refund_first_sender_no_funds(mock_rpc, seed, index):
     response = await wallet.refund_first_sender()
 
     assert response.success == False
-    assert response.error == "No funds available to refund."
+    assert response.error == "Insufficient balance. No funds available to refund."
 
 
 @pytest.mark.asyncio

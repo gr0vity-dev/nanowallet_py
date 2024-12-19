@@ -1,85 +1,113 @@
-@staticmethod
-def has_error(response):
-    """Check if response contains no error."""
-    if 'error' in response:
-        return True
-    return False
+from __future__ import annotations
+from typing import Dict, Any, Optional
 
 
-@staticmethod
-def get_error(response):
+class NanoException(Exception):
+    """Base exception for all Nano-related errors."""
+
+    def __init__(self, message: str, code: str):
+        self.message = message
+        self.code = code
+        super().__init__(self.message)
+
+
+class InvalidAmountError(NanoException):
+    """Raised when an amount is invalid (negative, wrong type, etc.)."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INVALID_AMOUNT")
+
+
+class RpcError(NanoException):
+    """Raised when the RPC call returns an error."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "RPC_ERROR")
+
+
+class InsufficientBalanceError(NanoException):
+    """Raised when account has insufficient balance for operation."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INSUFFICIENT_BALANCE")
+
+
+class InvalidAccountError(NanoException):
+    """Raised when account is invalid."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INVALID_ACCOUNT")
+
+
+class BlockNotFoundError(NanoException):
+    """Raised when block hash cannot be found."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "BLOCK_NOT_FOUND")
+
+
+class InvalidSeedError(NanoException):
+    """Raised when seed format is invalid."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INVALID_SEED")
+
+
+class InvalidIndexError(NanoException):
+    """Raised when account index is invalid."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INVALID_INDEX")
+
+
+#
+# Utility functions for interpreting RPC responses
+#
+
+def has_error(response: Dict[str, Any]) -> bool:
+    """Check if response contains an error field."""
+    return 'error' in response
+
+
+def get_error(response: Dict[str, Any]) -> Optional[str]:
     """Get error message from response if present."""
-    if has_error(response):
-        return response["error"]
-    return None
+    return response["error"] if has_error(response) else None
 
 
-@staticmethod
-def no_error(response):
+def no_error(response: Dict[str, Any]) -> bool:
     """Check if response contains no error."""
-    if has_error(response):
-        return False
-    return True
+    return not has_error(response)
 
 
-@staticmethod
-def raise_error(response, more=""):
-    """Raise ValueError if response contains an error."""
-    if has_error(response):
-        raise RpcError(
-            f"Error raised by RPC : {get_error(response)}{more}")
-
-
-@staticmethod
-def zero_balance(response):
+def zero_balance(response: Dict[str, Any]) -> bool:
     """Check if response indicates zero balance."""
-    if 'balance' in response:
-        if response['balance'] == '0':
-            return True
-    return False
+    return ('balance' in response and response['balance'] == '0')
 
 
-@staticmethod
-def account_not_found(response):
+def account_not_found(response: Dict[str, Any]) -> bool:
     """Check if response indicates account not found error."""
-    if get_error(response) == 'Account not found':
-        return True
-    return False
+    error_msg = get_error(response)
+    return error_msg == 'Account not found'
 
 
-@staticmethod
-def block_not_found(response):
+def block_not_found(response: Dict[str, Any]) -> bool:
     """Check if response indicates block not found error."""
-    if get_error(response) == 'Block not found':
-        return True
-    return False
+    error_msg = get_error(response)
+    return error_msg == 'Block not found'
 
 
-class RpcError(ValueError):
-    """Utility class for handling RPC response errors."""
-    pass
+def try_raise_error(response: Dict[str, Any]):
+    """
+    Raise a NanoException if response contains an error.
+    Tries to pick a more specific exception type based on the error message.
+    """
+    if has_error(response):
+        error_msg = get_error(response) or "Unknown error"
+        full_msg = f"{error_msg}"
 
-
-class InsufficientBalanceError(ValueError):
-    """Raised when account has insufficient balance for operation"""
-    pass
-
-
-class InvalidAccountError(ValueError):
-    """Raised when account is invalid"""
-    pass
-
-
-class BlockNotFoundError(ValueError):
-    """Raised when block hash cannot be found"""
-    pass
-
-
-class InvalidSeedError(ValueError):
-    """Raised when seed format is invalid"""
-    pass
-
-
-class InvalidIndexError(ValueError):
-    """Raised when account index is invalid"""
-    pass
+        if account_not_found(response):
+            raise InvalidAccountError(full_msg)
+        elif block_not_found(response):
+            raise BlockNotFoundError(full_msg)
+        else:
+            raise RpcError(full_msg)

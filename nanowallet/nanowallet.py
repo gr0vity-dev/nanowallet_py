@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
-from .errors import raise_error, account_not_found, no_error, block_not_found
+from .errors import try_raise_error, account_not_found, no_error, block_not_found
 from .errors import InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, validate_nano_amount, NanoResult
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
@@ -149,7 +149,7 @@ class NanoWallet:
         response = await self.rpc.blocks_info([block_hash], source=True, receive_hash=True, json_block=True)
         if block_not_found(response):
             raise BlockNotFoundError(f"Block not found {block_hash}")
-        raise_error(response, more=f" {block_hash}")
+        try_raise_error(response)
         return response['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
@@ -161,7 +161,7 @@ class NanoWallet:
         :raises ValueError: If work generation fails
         """
         response = await self.rpc.work_generate(pow_hash, use_peers=self.config.use_work_peers)
-        raise_error(response)
+        try_raise_error(response)
         return response['work']
 
     @handle_errors
@@ -170,7 +170,7 @@ class NanoWallet:
         Reloads the wallet's account information and receivable blocks.
         """
         response = await self.rpc.receivable(self.account, threshold=1)
-        raise_error(response)
+        try_raise_error(response)
 
         self.receivable_blocks = response["blocks"]
         account_info = await self._account_info()
@@ -204,7 +204,7 @@ class NanoWallet:
         """
         try:
             response = await self.rpc.process(block.json())
-            raise_error(response)
+            try_raise_error(response)
             block_hash = response['hash']
             logger.debug(
                 f"Successfully processed {operation}, hash: {block_hash}")
@@ -393,7 +393,8 @@ class NanoWallet:
         """
         has_balance = await self.has_balance()
         if not has_balance.unwrap():
-            raise ValueError("No funds available to refund.")
+            raise InsufficientBalanceError(
+                "Insufficient balance. No funds available to refund.")
         if self.open_block:
             block_info = await self._block_info(self.open_block)
             refund_account = block_info['source_account']
