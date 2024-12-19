@@ -1,51 +1,63 @@
-class RpcError():
-    """Utility class for handling RPC response errors."""
-    
-    @staticmethod
-    def account_not_found(response):
-        """Check if response indicates account not found error."""
-        if 'error' in response:
-            if response['error'] == 'Account not found':
-                return True
-        return False
-
-    @staticmethod
-    def no_error(response):
-        """Check if response contains no error."""
-        if 'error' in response:
-            return False
+@staticmethod
+def has_error(response):
+    """Check if response contains no error."""
+    if 'error' in response:
         return True
+    return False
 
-    @staticmethod 
-    def raise_error(response, more=""):
-        """Raise ValueError if response contains an error."""
-        if 'error' in response:
-            raise ValueError(f"Error raised by RPC : {response['error']}{more}")
 
-    @staticmethod
-    def get_error(response):
-        """Get error message from response if present."""
-        if 'error' in response:
-            return response['error']
-        return None
+@staticmethod
+def get_error(response):
+    """Get error message from response if present."""
+    if has_error(response):
+        return response["error"]
+    return None
 
-    @staticmethod
-    def zero_balance(response):
-        """Check if response indicates zero balance."""
-        if 'balance' in response:
-            if response['balance'] == '0':
-                return True
+
+@staticmethod
+def no_error(response):
+    """Check if response contains no error."""
+    if has_error(response):
         return False
-
-    @staticmethod
-    def block_not_found(response):
-        """Check if response indicates block not found error."""
-        if 'error' in response:
-            if response['error'] == 'Block not found':
-                return True
-        return False
+    return True
 
 
+@staticmethod
+def raise_error(response, more=""):
+    """Raise ValueError if response contains an error."""
+    if has_error(response):
+        raise RpcError(
+            f"Error raised by RPC : {get_error(response)}{more}")
+
+
+@staticmethod
+def zero_balance(response):
+    """Check if response indicates zero balance."""
+    if 'balance' in response:
+        if response['balance'] == '0':
+            return True
+    return False
+
+
+@staticmethod
+def account_not_found(response):
+    """Check if response indicates account not found error."""
+    if get_error(response) == 'Account not found':
+        return True
+    return False
+
+
+@staticmethod
+def block_not_found(response):
+    """Check if response indicates block not found error."""
+    if get_error(response) == 'Block not found':
+        return True
+    return False
+
+
+class RpcError(ValueError):
+    """Utility class for handling RPC response errors."""
+    pass
 
 
 class InsufficientBalanceError(ValueError):

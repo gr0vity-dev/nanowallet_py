@@ -2,7 +2,8 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
-from .errors import RpcError, InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
+from .errors import raise_error, account_not_found, no_error, block_not_found
+from .errors import InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, validate_nano_amount, NanoResult
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
@@ -62,7 +63,7 @@ class NanoWallet:
 
         self.private_key = generate_account_private_key(self.seed, index)
         self.account = get_account_id(private_key=self.private_key)
-        logger.info(
+        logger.debug(
             f"Initialized wallet for account {self.account} with index {index}")
         self._init_account_state()
 
@@ -146,7 +147,9 @@ class NanoWallet:
         :raises ValueError: If block is not found or RPC returns an error
         """
         response = await self.rpc.blocks_info([block_hash], source=True, receive_hash=True, json_block=True)
-        RpcError().raise_error(response, more=f" {block_hash}")
+        if block_not_found(response):
+            raise BlockNotFoundError(f"Block not found {block_hash}")
+        raise_error(response, more=f" {block_hash}")
         return response['blocks'][block_hash]
 
     async def _generate_work(self, pow_hash: str) -> str:
@@ -158,7 +161,7 @@ class NanoWallet:
         :raises ValueError: If work generation fails
         """
         response = await self.rpc.work_generate(pow_hash, use_peers=self.config.use_work_peers)
-        RpcError().raise_error(response)
+        raise_error(response)
         return response['work']
 
     @handle_errors
@@ -167,16 +170,16 @@ class NanoWallet:
         Reloads the wallet's account information and receivable blocks.
         """
         response = await self.rpc.receivable(self.account, threshold=1)
-        RpcError().raise_error(response)
+        raise_error(response)
 
         self.receivable_blocks = response["blocks"]
         account_info = await self._account_info()
-        if RpcError().account_not_found(account_info) and self.receivable_blocks:
+        if account_not_found(account_info) and self.receivable_blocks:
             # New account with receivable blocks
             self.receivable_balance_raw = sum(
                 int(amount) for amount in self.receivable_blocks.values())
             self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
-        elif RpcError().no_error(account_info):
+        elif no_error(account_info):
             self.balance = raw_to_nano(account_info["balance"])
             self.balance_raw = int(account_info["balance"])
             self.frontier_block = account_info["frontier"]
@@ -201,9 +204,9 @@ class NanoWallet:
         """
         try:
             response = await self.rpc.process(block.json())
-            RpcError().raise_error(response)
+            raise_error(response)
             block_hash = response['hash']
-            logger.info(
+            logger.debug(
                 f"Successfully processed {operation}, hash: {block_hash}")
             return block_hash
         except Exception as e:
@@ -246,7 +249,7 @@ class NanoWallet:
         :raises InvalidAccountError: If destination account is invalid
         :raises InsufficientBalanceError: If insufficient balance
         """
-        logger.info(
+        logger.debug(
             f"Attempting to send {amount_raw} raw to {destination_account}")
 
         if not destination_account:
@@ -258,16 +261,11 @@ class NanoWallet:
             raise InvalidAccountError("Invalid destination account.")
 
         params = await self._get_block_params()
-        if params['balance'] == 0:
-            logger.error(
-                f"Insufficient balance for send: balance=0 amount={amount_raw}")
-            raise InsufficientBalanceError("Insufficient balance.")
-
         new_balance = params['balance'] - amount_raw
-        if new_balance < 0:
-            logger.error(
-                f"Insufficient balance for send: balance={params['balance']} amount={amount_raw}")
-            msg = f"Insufficient funds! balance_raw:{params['balance']} amount_raw:{amount_raw}"
+
+        if params['balance'] == 0 or new_balance < 0:
+            msg = f"Insufficient balance for send! balance:{params['balance']} send_amount:{amount_raw}"
+            logger.error(msg)
             raise InsufficientBalanceError(msg)
 
         block = await self._build_block(
@@ -341,7 +339,7 @@ class NanoWallet:
         :return: A dictionary with information about the received block.
         :raises ValueError: If the block is not found.
         """
-        logger.info(f"Attempting to receive block {block_hash}")
+        logger.debug(f"Attempting to receive block {block_hash}")
 
         send_block_info = await self._block_info(block_hash)
         amount_raw = int(send_block_info['amount'])
@@ -469,7 +467,7 @@ class NanoWallet:
         :raises ValueError: If account info cannot be retrieved
         """
         account_info = await self._account_info()
-        if RpcError().account_not_found(account_info):
+        if account_not_found(account_info):
             logger.debug(
                 f"Account {self.account} not found, using default parameters")
             return {
@@ -482,6 +480,7 @@ class NanoWallet:
             f"Retrieved block params for {self.account}: balance={account_info['balance']}")
         return {
             'previous': account_info["frontier"],
+            # this is actually balance_raw
             'balance': int(account_info["balance"]),
             'representative': account_info["representative"]
         }

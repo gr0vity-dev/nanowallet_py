@@ -276,7 +276,7 @@ async def test_send_raw_error(mock_rpc, seed, index):
     result = await wallet.send_raw("nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1000000000000000000000000000000)
 
     assert result.success == False
-    assert result.error == "Insufficient funds! balance_raw:2000 amount_raw:1000000000000000000000000000000"
+    assert result.error == "Insufficient balance for send! balance:2000 send_amount:1000000000000000000000000000000"
 
 
 @pytest.mark.asyncio
@@ -390,6 +390,33 @@ async def test_receive_by_hash_new_account(mock_block, mock_rpc, seed, index):
                             'amount': Decimal('5E-27'), 'source': 'source_account1'}
     mock_block.assert_called()
     mock_rpc.process.assert_called()
+
+{"error": "Block not found"}
+
+
+@pytest.mark.asyncio
+async def test_receive_by_hash_not_found(mock_rpc, seed, index):
+    # Mock the RPC calls
+
+    mock_rpc.blocks_info.return_value = {"error": "Block not found"}
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.receive_by_hash("763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4")
+
+    assert result.success == False
+    assert result.error == "Block not found 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
+
+
+@pytest.mark.asyncio
+async def test_receive_all_nothing_found(mock_rpc, seed, index):
+    # Mock the RPC calls
+
+    mock_rpc.receivable.return_value = {"blocks": ""}
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.receive_all()
+
+    assert result.success == True
 
 
 def test_nano_to_raw():
@@ -519,7 +546,7 @@ async def test_receive_all_not_found(mock_rpc, seed, index):
     result = await wallet.receive_all()
 
     assert result.success == False
-    assert result.error == "Error raised by RPC : Block not found 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
+    assert result.error == "Block not found 763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
 
 
 @ pytest.mark.asyncio
