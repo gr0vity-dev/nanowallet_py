@@ -11,6 +11,13 @@ class NanoException(Exception):
         super().__init__(self.message)
 
 
+class TimeoutException(NanoException):
+    """Raised when an operation times out (e.g., confirmation waiting)."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "TIMEOUT")
+
+
 class InvalidAmountError(NanoException):
     """Raised when an amount is invalid (negative, wrong type, etc.)."""
 

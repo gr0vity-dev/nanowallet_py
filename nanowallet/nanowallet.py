@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from nanorpc.client import NanoRpcTyped
 from .errors import try_raise_error, account_not_found, no_error, block_not_found
-from .errors import InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError
+from .errors import InsufficientBalanceError, InvalidAccountError, BlockNotFoundError, InvalidSeedError, InvalidIndexError, TimeoutException
 from .utils import nano_to_raw, raw_to_nano, handle_errors, reload_after, validate_nano_amount, NanoResult
 from nano_lib_py import generate_account_private_key, get_account_id, Block, validate_account_id, get_account_public_key
 from dataclasses import dataclass
 import logging
 from decimal import Decimal
+import asyncio
+import time
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ class WalletConfig:
 SEED_LENGTH = 64  # Length of hex seed
 MAX_INDEX = 4294967295  # Maximum index value (2^32 - 1)
 ZERO_HASH = "0" * 64
-DEFAULT_THRESHOLD_RAW = 1
+DEFAULT_THRESHOLD_RAW = 10 ** 24
 
 
 class NanoWallet:
@@ -135,7 +137,7 @@ class NanoWallet:
 
         :return: Dictionary containing account information including balance, representative, etc.
         """
-        response = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True)
+        response = await self.rpc.account_info(self.account, weight=True, receivable=True, representative=True, include_confirmed=False)
         return response
 
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
@@ -163,6 +165,43 @@ class NanoWallet:
         response = await self.rpc.work_generate(pow_hash, use_peers=self.config.use_work_peers)
         try_raise_error(response)
         return response['work']
+
+    async def _wait_for_confirmation(self, block_hash: str, timeout: int = 300) -> bool:
+        """Wait for block confirmation with exponential backoff."""
+        start_time = time.time()
+        delay = 0.5  # Start with 500ms
+        max_delay = 32  # Cap maximum delay
+        attempt = 1
+
+        logger.debug(
+            f"Starting confirmation wait for {block_hash} with timeout={timeout}")
+
+        while (time.time() - start_time) < timeout:
+            try:
+                block_info = await self._block_info(block_hash)
+                confirmed = block_info.get("confirmed", "false") == "true"
+                logger.debug(
+                    f"Confirmation check attempt {attempt}: confirmed={confirmed}, elapsed={time.time() - start_time}")
+
+                if confirmed:
+                    return True
+
+                # Exponential backoff with cap
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)
+                attempt += 1
+
+            except BlockNotFoundError:
+                logger.debug(
+                    f"Block not found on attempt {attempt}, retrying after {delay}s")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)
+                attempt += 1
+                continue
+
+        logger.debug(
+            f"Confirmation wait timed out after {time.time() - start_time}s")
+        return False
 
     @handle_errors
     async def reload(self):
@@ -192,6 +231,7 @@ class NanoWallet:
             self.weight_raw = int(account_info["weight"])
             self.receivable_balance = raw_to_nano(account_info["receivable"])
             self.receivable_balance_raw = int(account_info["receivable"])
+            self.total_balance_raw = self.receivable_balance_raw + self.balance_raw
 
     async def _process_block(self, block: Block, operation: str) -> str:
         """
@@ -331,54 +371,86 @@ class NanoWallet:
 
     @handle_errors
     @reload_after
-    async def receive_by_hash(self, block_hash: str) -> NanoResult[dict]:
-        """
-        Receives a specific block by its hash.
+    async def receive_by_hash(self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30) -> NanoResult[dict]:
+        """Receives a specific block by its hash."""
+        logger.debug(
+            f"Starting receive_by_hash for block {block_hash}, wait_confirmation={wait_confirmation}, timeout={timeout}")
 
-        :param block_hash: The hash of the block to receive.
-        :return: A dictionary with information about the received block.
-        :raises ValueError: If the block is not found.
-        """
-        logger.debug(f"Attempting to receive block {block_hash}")
+        try:
+            send_block_info = await self._block_info(block_hash)
+            amount_raw = int(send_block_info['amount'])
+            logger.debug(f"Block {block_hash} contains {amount_raw} raw")
 
-        send_block_info = await self._block_info(block_hash)
-        amount_raw = int(send_block_info['amount'])
-        logger.debug(f"Block {block_hash} contains {amount_raw} raw")
+            params = await self._get_block_params()
+            new_balance = params['balance'] + amount_raw
+            logger.debug(f"Building block with new_balance={new_balance}")
 
-        params = await self._get_block_params()
-        new_balance = params['balance'] + amount_raw
+            block = await self._build_block(
+                previous=params['previous'],
+                representative=params['representative'],
+                balance=new_balance,
+                source_hash=block_hash
+            )
 
-        block = await self._build_block(
-            previous=params['previous'],
-            representative=params['representative'],
-            balance=new_balance,
-            source_hash=block_hash
-        )
+            received_hash = await self._process_block(block, f"receive of {amount_raw} raw from block {block_hash}")
+            logger.debug(f"Block processed with hash {received_hash}")
 
-        received_hash = await self._process_block(block, f"receive of {amount_raw} raw from block {block_hash}")
+            if wait_confirmation:
+                start_time = time.time()
+                logger.debug(
+                    f"Starting confirmation wait at {start_time}, timeout={timeout}")
 
-        result = {
-            'hash': received_hash,
-            'amount_raw': amount_raw,
-            'amount': raw_to_nano(amount_raw),
-            'source': send_block_info['block_account']
-        }
+                confirmed = await self._wait_for_confirmation(received_hash, timeout)
+                elapsed = time.time() - start_time
+                logger.debug(
+                    f"Confirmation wait finished. confirmed={confirmed}, elapsed={elapsed}")
 
-        return result
+                if not confirmed:
+                    logger.debug(f"Confirmation timeout, raising TimeoutError")
+                    raise TimeoutException(
+                        f"Block {received_hash} not confirmed within {timeout} seconds")
+
+            result = {
+                'hash': received_hash,
+                'amount_raw': amount_raw,
+                'amount': raw_to_nano(amount_raw),
+                'source': send_block_info['block_account'],
+                'confirmed': wait_confirmation and confirmed
+            }
+            logger.debug(f"Returning result: {result}")
+            return result
+
+        except Exception as e:
+            logger.debug(
+                f"Exception in receive_by_hash: {type(e).__name__}: {str(e)}")
+            raise
 
     @handle_errors
     @reload_after
-    async def receive_all(self, threshold_raw: float = None) -> NanoResult[list]:
+    async def receive_all(self, threshold_raw: float = DEFAULT_THRESHOLD_RAW,
+                          wait_confirmation: bool = True,
+                          timeout: int = 30) -> NanoResult[list]:
         """
         Receives all pending receivable blocks.
-        :return: A list of dictionary with information about each received block.
+
+        Args:
+            threshold_raw: Minimum amount to receive
+            wait_confirmation: If True, wait for block confirmations
+            timeout: Max seconds to wait for each confirmation
+
+        Returns:
+            List of dictionaries with information about each received block
         """
         block_results = []
         response = await self.list_receivables(threshold_raw=threshold_raw)
         receivables = response.unwrap()
 
         for receivable in receivables:
-            response_2 = await self.receive_by_hash(receivable[0])
+            response_2 = await self.receive_by_hash(
+                receivable[0],
+                wait_confirmation=wait_confirmation,
+                timeout=timeout
+            )
             block_results.append(response_2.unwrap())
 
         return block_results
