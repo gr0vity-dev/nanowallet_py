@@ -2,9 +2,14 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from nanorpc.client import NanoRpcTyped
 from nanowallet.nanowallet import NanoWallet, WalletUtils
-from nanowallet.utils import nano_to_raw, raw_to_nano, NanoResult, handle_errors, reload_after
-from nanowallet.errors import NanoException, InvalidAccountError
+
+from nanowallet.utils import NanoResult, handle_errors, reload_after
+from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
+
+
+nano_to_raw = WalletUtils.nano_to_raw
+raw_to_nano = WalletUtils.raw_to_nano
 
 
 @pytest.fixture
@@ -609,34 +614,40 @@ async def test_receive_all_nothing_found(mock_rpc, seed, index):
 
 def test_nano_to_raw():
     # Test case with 0.00005 Nano
-    input_nano = "0.00005"
-    expected_raw = 50000000000000000000000000
+    input_nano = "0.000000000005"
+    expected_raw = 5000000000000000000
 
     result = nano_to_raw(input_nano)
-
     assert result == expected_raw, f"Expected {expected_raw}, but got {result}"
+
+    result = nano_to_raw(input_nano, decimal_places=6)
+    assert result == 0, f"Expected 0, but got {result}"
+
+    result = nano_to_raw(input_nano, decimal_places=12)
+    assert result == 5000000000000000000, f"Expected {expected_raw}, but got {result}"
 
     # Additional test cases
     assert nano_to_raw(
         1) == 1000000000000000000000000000000, "Failed for 1 Nano"
     assert nano_to_raw(
-        0.1) == 100000000000000000000000000000, "Failed for 0.1 Nano"
+        "0.1") == 100000000000000000000000000000, "Failed for 0.1 Nano"
     assert nano_to_raw(
-        1.23456789) == 1234567890000000000000000000000, "Failed for 1.23456789 Nano"
+        "1.23456789") == 1234567890000000000000000000000, "Failed for 1.23456789 Nano"
 
     # Test case for a very small amount
     small_amount = "0.000000000000000000000000000001"
-    assert nano_to_raw(small_amount) == 1, "Failed for very small amount"
+    assert nano_to_raw(
+        small_amount) == 1, "Failed for very small amount"
 
-    # with pytest.raises(ValueError, match="Nano amount is negative"):
-    #     nano_to_raw("-1")
-    # with pytest.raises(ValueError, match="Nano amount is negative"):
-    #     nano_to_raw("-0.0001")
-    # with pytest.raises(ValueError, match="Nano amount is negative"):
-    #     nano_to_raw(
-    #         "-100000000000000000000000000000100000000000000000000000000000")
-    # with pytest.raises(ValueError):
-    #     nano_to_raw("invalid_input")
+    with pytest.raises(InvalidAmountError, match="Negative values are not allowed"):
+        nano_to_raw("-1")
+    with pytest.raises(NanoException, match="Negative values are not allowed"):
+        nano_to_raw("-0.0001")
+    with pytest.raises(NanoException):
+        nano_to_raw(
+            "-100000000000000000000000000000100000000000000000000000000000")
+    with pytest.raises(Exception):
+        nano_to_raw("invalid_input")
 
 
 def test_raw_to_nano():
@@ -644,7 +655,7 @@ def test_raw_to_nano():
     input_raw = 1234567890000000000000000011111
     expected_nano = Decimal('1.234567890000000000000000011111')
 
-    result = raw_to_nano(input_raw)
+    result = raw_to_nano(input_raw, decimal_places=30)
     print(result)
 
     assert result == expected_nano, f"""Expected {

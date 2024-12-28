@@ -101,7 +101,7 @@ def validate_nano_amount(amount: Union[Decimal, str, int]) -> Decimal:
     try:
         amount_decimal = Decimal(str(amount))
         if amount_decimal < 0:
-            raise InvalidAmountError("NANO amount cannot be negative")
+            raise InvalidAmountError("Negative values are not allowed")
         return amount_decimal
     except decimal.InvalidOperation:
         raise InvalidAmountError(f"Invalid NANO amount format: {amount}")

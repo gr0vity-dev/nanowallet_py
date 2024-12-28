@@ -562,7 +562,7 @@ class NanoWallet:
 class WalletUtils:
 
     @staticmethod
-    def raw_to_nano(amount_raw: int) -> Decimal:
+    def raw_to_nano(amount_raw: int, decimal_places=6) -> Decimal:
         """
         Converts raw amount to Nano, truncating to 6 decimal places.
 
@@ -572,10 +572,10 @@ class WalletUtils:
         Returns:
             Decimal: Amount in NANO, truncated to 6 decimal places
         """
-        return raw_to_nano(amount_raw, decimal_places=6)
+        return raw_to_nano(amount_raw, decimal_places=decimal_places)
 
     @staticmethod
-    def nano_to_raw(amount_nano: Decimal | str | int) -> int:
+    def nano_to_raw(amount_nano: Decimal | str | int, decimal_places=30) -> int:
         """
         Converts Nano amount to raw amount.
 
@@ -590,7 +590,7 @@ class WalletUtils:
             ValueError: If amount is negative or invalid format
         """
         amount_decimal = validate_nano_amount(amount_nano)
-        return nano_to_raw(amount_decimal)
+        return nano_to_raw(raw_to_nano(nano_to_raw(amount_decimal), decimal_places=decimal_places))
 
     @staticmethod
     def sum_received_amount(receive_all_response: List[dict]) -> dict:
