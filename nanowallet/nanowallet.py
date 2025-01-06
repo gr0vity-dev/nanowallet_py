@@ -482,6 +482,49 @@ class NanoWallet:
         return result
 
     @handle_errors
+    @reload_after
+    async def account_history(self, count: Optional[int] = -1, head: Optional[str] = None) -> NanoResult[List[Dict[str, Any]]]:
+        """
+        Get block history for the wallet's account.
+
+        Args:
+            count: Number of blocks to retrieve, -1 for all blocks (default)
+            head: Start from specific block hash instead of latest
+
+        Returns:
+            List of blocks with their details
+        """
+        try:
+            response = await self.rpc.account_history(
+                account=self.account,
+                count=count,
+                raw=True,
+                head=head
+            )
+
+            if account_not_found(response):
+                return []
+
+            try_raise_error(response)
+
+            # Extract and normalize the history list
+            history = response.get("history", [])
+            for block in history:
+                block["amount_raw"] = int(block["amount"])
+                block["amount"] = raw_to_nano(block["amount_raw"])
+                block["balance_raw"] = int(block["balance"])
+                block["balance"] = raw_to_nano(block["balance_raw"])
+                block["timestamp"] = int(block["local_timestamp"])
+                block["height"] = int(block["height"])
+                block["confirmed"] = block["confirmed"] == "true"
+
+            return history
+
+        except Exception as e:
+            logger.error(f"Error retrieving account history: {str(e)}")
+            raise BlockNotFoundError("Could not retrieve account history")
+
+    @handle_errors
     async def has_balance(self) -> NanoResult[bool]:
         """
         Checks if the account has available balance or receivable balance.

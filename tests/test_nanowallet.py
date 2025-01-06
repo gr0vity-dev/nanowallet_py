@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, Mock
 from nanorpc.client import NanoRpcTyped
 from nanowallet.nanowallet import NanoWallet, WalletUtils
 
@@ -1298,3 +1298,95 @@ async def test_combined_decorators():
     with pytest.raises(NanoException) as exc_info:
         result.unwrap()
     assert exc_info.value.code == "INVALID_ACCOUNT"
+
+
+@pytest.mark.asyncio
+async def test_account_history():
+    rpc = Mock(spec=NanoRpcTyped)
+
+    mock_response = {
+        "account": "nano_118tih7f81iiuujdezyqnbb9aonybf6y3cj7mo7hbeetqiymkn16a67w8rkp",
+        "history": [
+            {
+                "account": "nano_1htaxaiwg5h46afhxctm9khz74zjk75zrsth16upt3b17wndty5rwoowr3hu",
+                "amount": "3000000000000000000000000",
+                "balance": "685480328931131963959607814791168",
+                "confirmed": "true",
+                "hash": "D80E18554DB0DE3CCE463943BCA91F09A72AA304F18E6E60F2AA09D6426B3BD7",
+                "height": "287",
+                "link": "3F48EA21C70DE2221AFEAB533C9FF28BF19147FC674F01376D05202F28BD7878",
+                "local_timestamp": "1735991174",
+                "previous": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+                "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+                "signature": "93048CA02BEA5F825AEFECBEEFCCE5364871806F74A5EB1AF59D4CA46FDF6FD8A8EE27474FB31E9A5EF9AB9ECD4BCAED2075CCF6057852AED227BA6E0720E902",
+                "subtype": "send",
+                "type": "state",
+                "work": "9cf61f7561c1ab3c"
+            },
+            {
+                "account": "nano_3duhkw8zo3gzgq9dgubbwsnbd5k769c5zyi4dheck8yg4ukm83gf7a7nhts5",
+                "amount": "35714000000000000000000000000",
+                "balance": "685480331931131963959607814791168",
+                "confirmed": "true",
+                "hash": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+                "height": "286",
+                "link": "AF6F970DFA85DF75CEB76D29E668958E4521D43FFA025BD8A91BCE16E53305CD",
+                "local_timestamp": "1735434546",
+                "previous": "BB48158268E2423F98B5363FB10685C593415286ED39E5F4452E29DBE0BBFD6C",
+                "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+                "signature": "F85918BCA24EB4E221CA49109E0DB6EEBA4BBA177B73374815AF039A42ED002433AA4FF2941A3E51CE9C339EF186937C4896756D84964003D08B4542A2034F04",
+                "subtype": "send",
+                "type": "state",
+                "work": "fc21cadd1abbbe4f"
+            }
+        ]
+    }
+
+    rpc.account_history.return_value = mock_response
+
+    wallet = NanoWallet(rpc, "0" * 64, 0)
+    result = await wallet.account_history(count=2)
+    blocks = result.unwrap()
+
+    expected_blocks = [
+        {
+            "account": "nano_1htaxaiwg5h46afhxctm9khz74zjk75zrsth16upt3b17wndty5rwoowr3hu",
+            "amount": Decimal("0.000003"),
+            "balance": Decimal("685.480328931131963959607814791168"),
+            "confirmed": True,
+            "hash": "D80E18554DB0DE3CCE463943BCA91F09A72AA304F18E6E60F2AA09D6426B3BD7",
+            "height": 287,
+            "link": "3F48EA21C70DE2221AFEAB533C9FF28BF19147FC674F01376D05202F28BD7878",
+            "local_timestamp": "1735991174",
+            "previous": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+            "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+            "signature": "93048CA02BEA5F825AEFECBEEFCCE5364871806F74A5EB1AF59D4CA46FDF6FD8A8EE27474FB31E9A5EF9AB9ECD4BCAED2075CCF6057852AED227BA6E0720E902",
+            "subtype": "send",
+            "type": "state",
+            "work": "9cf61f7561c1ab3c",
+            "amount_raw": 3000000000000000000000000,
+            "balance_raw": 685480328931131963959607814791168,
+            "timestamp": 1735991174
+        },
+        {
+            "account": "nano_3duhkw8zo3gzgq9dgubbwsnbd5k769c5zyi4dheck8yg4ukm83gf7a7nhts5",
+            "amount": Decimal("0.035714"),
+            "balance": Decimal("685.480331931131963959607814791168"),
+            "confirmed": True,
+            "hash": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+            "height": 286,
+            "link": "AF6F970DFA85DF75CEB76D29E668958E4521D43FFA025BD8A91BCE16E53305CD",
+            "local_timestamp": "1735434546",
+            "previous": "BB48158268E2423F98B5363FB10685C593415286ED39E5F4452E29DBE0BBFD6C",
+            "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+            "signature": "F85918BCA24EB4E221CA49109E0DB6EEBA4BBA177B73374815AF039A42ED002433AA4FF2941A3E51CE9C339EF186937C4896756D84964003D08B4542A2034F04",
+            "subtype": "send",
+            "type": "state",
+            "work": "fc21cadd1abbbe4f",
+            "amount_raw": 35714000000000000000000000000,
+            "balance_raw": 685480331931131963959607814791168,
+            "timestamp": 1735434546
+        }
+    ]
+
+    assert blocks == expected_blocks
