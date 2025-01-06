@@ -71,9 +71,10 @@ class InvalidIndexError(NanoException):
 # Utility functions for interpreting RPC responses
 #
 
+
 def has_error(response: Dict[str, Any]) -> bool:
     """Check if response contains an error field."""
-    return 'error' in response
+    return "error" in response
 
 
 def get_error(response: Dict[str, Any]) -> Optional[str]:
@@ -88,19 +89,19 @@ def no_error(response: Dict[str, Any]) -> bool:
 
 def zero_balance(response: Dict[str, Any]) -> bool:
     """Check if response indicates zero balance."""
-    return ('balance' in response and response['balance'] == '0')
+    return "balance" in response and response["balance"] == "0"
 
 
 def account_not_found(response: Dict[str, Any]) -> bool:
     """Check if response indicates account not found error."""
     error_msg = get_error(response)
-    return error_msg == 'Account not found'
+    return error_msg == "Account not found"
 
 
 def block_not_found(response: Dict[str, Any]) -> bool:
     """Check if response indicates block not found error."""
     error_msg = get_error(response)
-    return error_msg == 'Block not found'
+    return error_msg == "Block not found"
 
 
 def try_raise_error(response: Dict[str, Any]):

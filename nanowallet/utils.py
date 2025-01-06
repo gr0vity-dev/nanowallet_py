@@ -11,13 +11,13 @@ from .errors import NanoException, InvalidAmountError
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-RAW_PER_NANO = Decimal('10') ** 30
+RAW_PER_NANO = Decimal("10") ** 30
 
-R = TypeVar('R')
-T = TypeVar('T')
+R = TypeVar("R")
+T = TypeVar("T")
 
 
-class NanoResult():
+class NanoResult:
     def __init__(self, value: T = None, error: str = None, error_code: str = None):
         self.value = value
         self.error = error
@@ -37,13 +37,15 @@ class NanoResult():
         """
         if self.error:
             raise NanoException(
-                self.error, self.error_code if self.error_code else "UNKNOWN_ERROR")
+                self.error, self.error_code if self.error_code else "UNKNOWN_ERROR"
+            )
         return self.value
 
 
 #
 # Conversion utilities
 #
+
 
 def raw_to_nano(raw_amount: Union[int, str, Decimal], decimal_places=30) -> Decimal:
     """
@@ -54,22 +56,24 @@ def raw_to_nano(raw_amount: Union[int, str, Decimal], decimal_places=30) -> Deci
     nano_amount = raw_decimal / RAW_PER_NANO
 
     # Convert to string with full precision
-    nano_str = format(nano_amount, 'f')
+    nano_str = format(nano_amount, "f")
 
     # Split into integer and decimal parts
-    if '.' in nano_str:
-        int_part, dec_part = nano_str.split('.')
+    if "." in nano_str:
+        int_part, dec_part = nano_str.split(".")
         # Truncate decimal part to specified places
         dec_part = dec_part[:decimal_places]
         # Pad with zeros if needed
-        dec_part = dec_part.ljust(decimal_places, '0')
+        dec_part = dec_part.ljust(decimal_places, "0")
         truncated_str = f"{int_part}.{dec_part}"
     else:
         # Handle whole numbers
         truncated_str = f"{nano_str}.{'0' * decimal_places}"
 
     # Convert back to Decimal
-    return Decimal(truncated_str.rstrip('0').rstrip('.') if '.' in truncated_str else truncated_str)
+    return Decimal(
+        truncated_str.rstrip("0").rstrip(".") if "." in truncated_str else truncated_str
+    )
 
 
 def nano_to_raw(nano_amount: Union[str, Decimal, int]) -> int:
@@ -92,11 +96,11 @@ def validate_nano_amount(amount: Union[Decimal, str, int]) -> Decimal:
     """
     if isinstance(amount, float):
         raise InvalidAmountError(
-            "Float values are not allowed for NANO amounts - use Decimal or string to maintain precision")
+            "Float values are not allowed for NANO amounts - use Decimal or string to maintain precision"
+        )
 
     if not isinstance(amount, (Decimal, str, int)):
-        raise InvalidAmountError(
-            f"Invalid type for NANO amount: {type(amount)}")
+        raise InvalidAmountError(f"Invalid type for NANO amount: {type(amount)}")
 
     try:
         amount_decimal = Decimal(str(amount))
@@ -111,6 +115,7 @@ def validate_nano_amount(amount: Union[Decimal, str, int]) -> Decimal:
 # Decorators
 #
 
+
 def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R]]:
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
@@ -121,10 +126,13 @@ def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R
         except Exception as e:
             await self.reload()
             raise e
+
     return wrapper
 
 
-def handle_errors(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[NanoResult]]:
+def handle_errors(
+    func: Callable[..., Awaitable[R]]
+) -> Callable[..., Awaitable[NanoResult]]:
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
         try:
@@ -132,13 +140,16 @@ def handle_errors(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[
             return NanoResult(value=result)
         except NanoException as e:
             # Known Nano-related exception
-            logger.error("NanoException in %s: %s",
-                         func.__name__, e.message, exc_info=True)
+            logger.error(
+                "NanoException in %s: %s", func.__name__, e.message, exc_info=True
+            )
             return NanoResult(error=e.message, error_code=e.code)
         except Exception as e:
             # For any other exception, preserve the original message so existing tests pass.
             # The test expects the original error message (e.g. ValueError("No funds available to refund."))
-            logger.error("Unexpected error in %s: %s",
-                         func.__name__, str(e), exc_info=True)
+            logger.error(
+                "Unexpected error in %s: %s", func.__name__, str(e), exc_info=True
+            )
             return NanoResult(error=str(e), error_code="UNEXPECTED_ERROR")
+
     return wrapper
