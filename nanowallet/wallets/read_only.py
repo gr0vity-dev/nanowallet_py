@@ -2,12 +2,12 @@ from typing import Optional, List, Dict, Any, Protocol
 from decimal import Decimal
 from nanorpc.client import NanoRpcTyped
 from ..models import WalletConfig, WalletBalance, AccountInfo
-from ..utils import raw_to_nano, handle_errors, reload_after
+from ..utils.conversion import raw_to_nano
+from ..utils.decorators import handle_errors, reload_after
 from ..errors import (
     try_raise_error,
     account_not_found,
     no_error,
-    block_not_found,
     InvalidAccountError,
     BlockNotFoundError,
 )
@@ -222,9 +222,6 @@ class NanoWalletReadOnly(NanoWalletBase):
                 block_count=int(account_info["block_count"]),
                 weight_raw=int(account_info["weight"]),
             )
-
-        # Update legacy attributes for backward compatibility
-        self._update_legacy_attributes()
 
     def to_string(self):
         return (

@@ -248,7 +248,6 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         )
         return {
             "previous": account_info["frontier"],
-            # this is actually balance_raw
             "balance": int(account_info["balance"]),
             "representative": account_info["representative"],
         }
@@ -341,7 +340,9 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         if sweep_pending:
             await self.receive_all(threshold_raw=threshold_raw)
 
-        response = await self.send_raw(destination_account, self.balance_raw)
+        response = await self.send_raw(
+            destination_account, self._balance_info.balance_raw
+        )
         return response.unwrap()
 
     @handle_errors
@@ -451,8 +452,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             raise InsufficientBalanceError(
                 "Insufficient balance. No funds available to refund."
             )
-        if self.open_block:
-            block_info = await self._block_info(self.open_block)
+        if self._account_info.open_block:
+            block_info = await self._block_info(self._account_info.open_block)
             refund_account = block_info["source_account"]
         elif self.receivable_blocks:
             first_receivable_hash = next(iter(self.receivable_blocks))

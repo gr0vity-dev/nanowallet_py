@@ -9,7 +9,7 @@ from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
 from nanowallet.utils.conversion import raw_to_nano, nano_to_raw
-
+from nanowallet.models import AccountInfo, WalletBalance
 
 nano_to_raw = WalletUtils.nano_to_raw
 raw_to_nano = WalletUtils.raw_to_nano
@@ -72,23 +72,27 @@ async def test_reload(mock_rpc, seed, index):
     }
 
     wallet = NanoWallet(mock_rpc, seed, index)
-    await wallet.reload()
+    wallet_info_response = await wallet.account_info()
+    balance_info_response = await wallet.balance_info()
+    wallet_info: AccountInfo = wallet_info_response.unwrap()
+    balance_info: WalletBalance = balance_info_response.unwrap()
 
-    assert wallet.balance == 2
-    assert wallet.balance_raw == 2000000000000000000000000000000
-    assert wallet.frontier_block == "frontier_block"
-    assert wallet.representative_block == "representative_block"
+    assert balance_info.balance == 2
+    assert balance_info.balance_raw == 2000000000000000000000000000000
+    assert balance_info.receivable == 1
+    assert balance_info.receivable_raw == 1000000000000000000000000000000
+
+    assert wallet_info.frontier_block == "frontier_block"
+    assert wallet_info.representative_block == "representative_block"
     assert (
-        wallet.representative
+        wallet_info.representative
         == "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf"
     )
-    assert wallet.open_block == "open_block"
-    assert wallet.confirmation_height == 40
-    assert wallet.block_count == 50
-    assert wallet.weight == 3
-    assert wallet.weight_raw == 3000000000000000000000000000000
-    assert wallet.receivable_balance == 1
-    assert wallet.receivable_balance_raw == 1000000000000000000000000000000
+    assert wallet_info.open_block == "open_block"
+    assert wallet_info.confirmation_height == 40
+    assert wallet_info.block_count == 50
+    assert wallet_info.weight == 3
+    assert wallet_info.weight_raw == 3000000000000000000000000000000
 
 
 @pytest.mark.asyncio
@@ -106,18 +110,20 @@ async def test_reload_unopened(mock_rpc, seed, index):
     wallet = NanoWallet(mock_rpc, seed, index)
     await wallet.reload()
 
-    assert wallet.balance == 0
-    assert wallet.balance_raw == 0
-    assert wallet.frontier_block == None
-    assert wallet.representative_block == None
-    assert wallet.representative == None
-    assert wallet.open_block == None
-    assert wallet.confirmation_height == 0
-    assert wallet.block_count == 0
-    assert wallet.weight == 0
-    assert wallet.weight_raw == 0
-    assert wallet.receivable_balance == Decimal("4.000000000000000000000000000001")
-    assert wallet.receivable_balance_raw == 4000000000000000000000000000001
+    assert wallet._balance_info.balance == 0
+    assert wallet._balance_info.balance_raw == 0
+    assert wallet._account_info.frontier_block == None
+    assert wallet._account_info.representative_block == None
+    assert wallet._account_info.representative == None
+    assert wallet._account_info.open_block == None
+    assert wallet._account_info.confirmation_height == 0
+    assert wallet._account_info.block_count == 0
+    assert wallet._account_info.weight == 0
+    assert wallet._account_info.weight_raw == 0
+    assert wallet._balance_info.receivable == Decimal(
+        "4.000000000000000000000000000001"
+    )
+    assert wallet._balance_info.receivable_raw == 4000000000000000000000000000001
     assert wallet.receivable_blocks == {
         "b1": "1000000000000000000000000000000",
         "b2": "1",
@@ -137,7 +143,7 @@ async def test_reload_unopened_2(mock_rpc, seed, index):
     await wallet.reload()
     await wallet.reload()
 
-    assert wallet.receivable_balance_raw == 1000000000000000000000000000123
+    assert wallet._balance_info.receivable_raw == 1000000000000000000000000000123
     assert wallet.receivable_blocks == {"b1": "1000000000000000000000000000123"}
 
 
@@ -150,18 +156,18 @@ async def test_reload_unopen_no_receivables(mock_rpc, seed, index):
     wallet = NanoWallet(mock_rpc, seed, index)
     await wallet.reload()
 
-    assert wallet.balance == 0
-    assert wallet.balance_raw == 0
-    assert wallet.frontier_block == None
-    assert wallet.representative_block == None
-    assert wallet.representative == None
-    assert wallet.open_block == None
-    assert wallet.confirmation_height == 0
-    assert wallet.block_count == 0
-    assert wallet.weight == 0
-    assert wallet.weight_raw == 0
-    assert wallet.receivable_balance == 0
-    assert wallet.receivable_balance_raw == 0
+    assert wallet._balance_info.balance == 0
+    assert wallet._balance_info.balance_raw == 0
+    assert wallet._account_info.frontier_block == None
+    assert wallet._account_info.representative_block == None
+    assert wallet._account_info.representative == None
+    assert wallet._account_info.open_block == None
+    assert wallet._account_info.confirmation_height == 0
+    assert wallet._account_info.block_count == 0
+    assert wallet._account_info.weight == 0
+    assert wallet._account_info.weight_raw == 0
+    assert wallet._balance_info.receivable == 0
+    assert wallet._balance_info.receivable_raw == 0
     assert wallet.receivable_blocks == ""
 
 
@@ -185,21 +191,21 @@ async def test_reload_no_receivables(mock_rpc, seed, index):
     wallet = NanoWallet(mock_rpc, seed, index)
     await wallet.reload()
 
-    assert wallet.balance == 2
-    assert wallet.balance_raw == 2000000000000000000000000000000
-    assert wallet.frontier_block == "frontier_block"
-    assert wallet.representative_block == "representative_block"
+    assert wallet._balance_info.balance == 2
+    assert wallet._balance_info.balance_raw == 2000000000000000000000000000000
+    assert wallet._account_info.frontier_block == "frontier_block"
+    assert wallet._account_info.representative_block == "representative_block"
     assert (
-        wallet.representative
+        wallet._account_info.representative
         == "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf"
     )
-    assert wallet.open_block == "open_block"
-    assert wallet.confirmation_height == 40
-    assert wallet.block_count == 50
-    assert wallet.weight == 3
-    assert wallet.weight_raw == 3000000000000000000000000000000
-    assert wallet.receivable_balance == 1
-    assert wallet.receivable_balance_raw == 1000000000000000000000000000000
+    assert wallet._account_info.open_block == "open_block"
+    assert wallet._account_info.confirmation_height == 40
+    assert wallet._account_info.block_count == 50
+    assert wallet._account_info.weight == 3
+    assert wallet._account_info.weight_raw == 3000000000000000000000000000000
+    assert wallet._balance_info.receivable == 1
+    assert wallet._balance_info.receivable_raw == 1000000000000000000000000000000
 
 
 @pytest.mark.asyncio
@@ -1132,7 +1138,7 @@ async def test_refund_first_sender_unopened(mock_rpc, seed, index):
 async def test_refund_first_sender_no_account(mock_rpc, seed, index):
 
     wallet = NanoWallet(mock_rpc, seed, index)
-    print(wallet.open_block)
+    print(wallet._account_info.open_block)
 
     mock_rpc.account_info.return_value = {"error": "Account not found"}
     response = await wallet.refund_first_sender()

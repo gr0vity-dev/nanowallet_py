@@ -27,31 +27,8 @@ class NanoWalletBase:
         """Initialize account state variables"""
         self.account = None
         self.receivable_blocks = {}
-
-        # Initialize data models
         self._balance_info = WalletBalance()
         self._account_info = AccountInfo()
-
-        # For backward compatibility
-        self._update_legacy_attributes()
-
-    def _update_legacy_attributes(self):
-        """Update legacy attributes from data models for backward compatibility"""
-        # Balance related
-        self.balance = self._balance_info.balance
-        self.balance_raw = self._balance_info.balance_raw
-        self.receivable_balance = self._balance_info.receivable
-        self.receivable_balance_raw = self._balance_info.receivable_raw
-
-        # Account related
-        self.weight = self._account_info.weight
-        self.weight_raw = self._account_info.weight_raw
-        self.confirmation_height = self._account_info.confirmation_height
-        self.block_count = self._account_info.block_count
-        self.frontier_block = self._account_info.frontier_block
-        self.representative_block = self._account_info.representative_block
-        self.representative = self._account_info.representative
-        self.open_block = self._account_info.open_block
 
     async def _fetch_account_info(self) -> Dict[str, Any]:
         """Get account information from RPC"""
