@@ -1,3 +1,4 @@
+# nanowallet/wallets/read_only.py
 from typing import Optional, List, Dict, Any, Protocol
 from nanorpc.client import NanoRpcTyped
 from ..models import WalletConfig, WalletBalance, AccountInfo

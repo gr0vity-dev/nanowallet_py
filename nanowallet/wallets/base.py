@@ -1,3 +1,4 @@
+# nanowallet/wallets/base.py
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
 from nanorpc.client import NanoRpcTyped
