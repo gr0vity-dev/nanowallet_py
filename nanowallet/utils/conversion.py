@@ -53,7 +53,7 @@ def raw_to_nano(amount_raw: int, decimal_places=6) -> Decimal:
     Converts raw amount to Nano, truncating to 6 decimal places.
 
     Args:
-        raw_amount: Amount in raw units
+        amount_raw: Amount in raw units
 
     Returns:
         Decimal: Amount in NANO, truncated to 6 decimal places

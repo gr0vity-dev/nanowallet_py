@@ -5,18 +5,11 @@ import asyncio
 import time
 import logging
 
-
-from nanorpc.client import NanoRpcTyped
-from nano_lib_py import (
-    Block,
-    get_account_id,
-    get_account_public_key,
-)
-
-
+from ..libs.account_helper import AccountHelper
+from ..libs.block import NanoWalletBlock
 from ..models import WalletConfig
 from ..utils.conversion import _raw_to_nano, _nano_to_raw
-from ..utils.validation import validate_account_id, validate_nano_amount
+from ..utils.validation import validate_nano_amount
 from ..utils.decorators import handle_errors, reload_after
 
 from ..errors import (
@@ -27,7 +20,7 @@ from ..errors import (
     TimeoutException,
 )
 from .read_only import NanoWalletReadOnly, NanoWalletReadOnlyProtocol
-from .rpc import NanoWalletRpc, NanoRpcProtocol
+from ..libs.rpc import NanoWalletRpc
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -93,7 +86,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :param config: Optional wallet configuration
         """
         # First get the account from the private key
-        account = get_account_id(private_key=private_key)
+        account = AccountHelper.get_account_address(private_key)
         super().__init__(rpc, account, config)
         self.private_key = private_key
 
@@ -104,7 +97,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         balance: int,
         source_hash: Optional[str] = None,
         destination_account: Optional[str] = None,
-    ) -> Block:
+    ) -> NanoWalletBlock:
         """
         Builds a state block with the given parameters.
 
@@ -116,42 +109,23 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: Block instance
         :raises ValueError: If parameters are invalid
         """
-
         print(f"source_hash: {source_hash}, destination_account: {destination_account}")
         print(
             f"previous: {previous}, representative: {representative}, balance: {balance}"
         )
-        if source_hash and destination_account:
-            raise ValueError(
-                "Specify either `source_hash` or `destination_account`. Never both"
-            )
-        if not source_hash and not destination_account:
-            raise ValueError(
-                "Missing argument. Specify either `source_hash` or `destination_account`."
-            )
 
-        # Initialize link before using it
-        link = None
-        if destination_account:
-            link = get_account_public_key(account_id=destination_account)
-        elif source_hash:
-            link = source_hash
-
-        if link is None:
-            raise ValueError("Failed to generate link value")
-
-        block = Block(
-            block_type="state",
+        block = NanoWalletBlock(
             account=self.account,
             previous=previous,
             representative=representative,
             balance=balance,
-            link=link,
+            source_hash=source_hash,
+            destination_account=destination_account,
         )
 
-        Block.sign(block, self.private_key)
+        block.sign(self.private_key)
         work = await self._generate_work(block.work_block_hash)
-        block.work = work
+        block.set_work(work)
         return block
 
     async def _generate_work(self, pow_hash: str) -> str:
@@ -213,7 +187,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         )
         return False
 
-    async def _process_block(self, block: Block, operation: str) -> str:
+    async def _process_block(self, block: NanoWalletBlock, operation: str) -> str:
         """
         Process a block and handle errors consistently.
 
@@ -222,7 +196,6 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: Hash of the processed block
         :raises ValueError: If block processing fails
         """
-
         response = await self.rpc.process(block.json())
         print(f"our response: {response}")
 
@@ -299,7 +272,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             logger.error("Invalid destination account: %s", destination_account)
             raise InvalidAccountError("Destination can't be None")
 
-        if not validate_account_id(destination_account):
+        if not AccountHelper.validate_account(destination_account):
             logger.error("Invalid destination account: %s", destination_account)
             raise InvalidAccountError("Invalid destination account.")
 
@@ -339,7 +312,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: The hash of the sent block.
         :raises ValueError: If the destination account is invalid or insufficient balance.
         """
-        if not validate_account_id(destination_account):
+        if not AccountHelper.validate_account(destination_account):
             raise InvalidAccountError("Invalid destination account.")
 
         if sweep_pending:

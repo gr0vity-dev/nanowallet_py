@@ -1,6 +1,6 @@
 # nanowallet/wallets/base.py
 from typing import Optional, Dict, Any
-from .rpc import NanoWalletRpc
+from ..libs.rpc import NanoWalletRpc
 from ..models import WalletConfig, WalletBalance, AccountInfo
 
 

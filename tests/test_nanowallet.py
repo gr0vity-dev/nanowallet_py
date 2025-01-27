@@ -218,7 +218,7 @@ async def test_reload_no_receivables(mock_rpc, mock_rpc_typed, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -249,7 +249,7 @@ async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_send_raw(mock_block, mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -369,7 +369,7 @@ async def test_list_receivables_threshold(mock_rpc, mock_rpc_typed, seed, index)
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
     mock_rpc_typed.blocks_info.return_value = {
@@ -408,7 +408,7 @@ async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_receive_by_hash_wait_conf(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -467,7 +467,7 @@ async def test_receive_by_hash_wait_conf(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_receive_by_hash_new_account(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -504,7 +504,7 @@ async def test_receive_by_hash_new_account(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.Block")
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_receive_by_hash_new_account_with_conf(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):

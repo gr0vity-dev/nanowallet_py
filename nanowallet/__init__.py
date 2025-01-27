@@ -17,7 +17,7 @@ from .errors import (
 )
 from .utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
 from .utils.validation import validate_nano_amount, validate_account
-from .wallets.rpc import NanoWalletRpc
+from .libs.rpc import NanoWalletRpc
 
 __all__ = [
     # Wallet classes
