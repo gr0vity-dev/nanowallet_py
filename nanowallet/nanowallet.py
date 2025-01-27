@@ -1,6 +1,6 @@
 # nano_wallet_lib/nanowallet.py
 from __future__ import annotations
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Protocol
 from nanorpc.client import NanoRpcTyped
 from .errors import try_raise_error, account_not_found, no_error, block_not_found
 from .errors import (
@@ -53,54 +53,94 @@ ZERO_HASH = "0" * 64
 DEFAULT_THRESHOLD_RAW = 10**24
 
 
-class NanoWallet:
-    """
-    A class representing a Nano wallet.
-    """
+class NanoWalletReadOnlyProtocol(Protocol):
+    """Protocol defining read-only operations for a Nano wallet"""
+
+    account: str  # The nano account address
+
+    async def account_history(
+        self, count: Optional[int] = -1, head: Optional[str] = None
+    ) -> NanoResult[List[Dict[str, Any]]]:
+        """Get block history for the wallet's account"""
+        ...
+
+    async def has_balance(self) -> NanoResult[bool]:
+        """Check if account has available balance"""
+        ...
+
+    async def balance_info(self) -> NanoResult[dict]:
+        """Get detailed balance information"""
+        ...
+
+    async def list_receivables(
+        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
+    ) -> NanoResult[List[tuple]]:
+        """List receivable blocks"""
+        ...
+
+    async def reload(self):
+        """Reload account information"""
+        ...
+
+
+class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
+    """Protocol defining key operations for a Nano wallet"""
+
+    private_key: str  # The private key for signing transactions
+
+    async def send(
+        self, destination_account: str, amount: Decimal | str | int
+    ) -> NanoResult[str]:
+        """Sends Nano to a destination account"""
+        ...
+
+    async def send_raw(self, destination_account: str, amount: int) -> NanoResult[str]:
+        """Sends Nano to a destination account"""
+        ...
+
+    async def receive(self, source_hash: str) -> NanoResult[str]:
+        """Receives Nano from a source account"""
+        ...
+
+    async def sweep(
+        self,
+        destination_account: str,
+        sweep_pending: bool = True,
+        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+    ) -> NanoResult[str]:
+        """Transfers all funds from the current account to the destination account"""
+        ...
+
+    async def receive_by_hash(
+        self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
+    ) -> NanoResult[dict]:
+        """Receives a specific block by its hash"""
+        ...
+
+    async def receive_all(
+        self,
+        threshold_raw: float = DEFAULT_THRESHOLD_RAW,
+        wait_confirmation: bool = True,
+        timeout: int = 30,
+    ) -> NanoResult[list]:
+        """Receives all pending receivable blocks"""
+        ...
+
+    async def refund_first_sender(self) -> NanoResult[str]:
+        """Sends remaining funds to the account opener"""
+        ...
+
+
+class NanoWalletBase:
+    """Base implementation with shared functionality"""
 
     def __init__(
         self,
         rpc: NanoRpcTyped,
-        seed: str,
-        index: int,
         config: Optional[WalletConfig] = None,
     ):
-        """
-        Initializes the NanoWallet.
-
-        :param rpc: An instance of NanoRpcTyped client
-        :param seed: The seed of the wallet (64 character hex string)
-        :param index: The account index derived from the seed (0 to 2^32-1)
-        :param config: Optional wallet configuration
-        :raises InvalidSeedError: If seed format is invalid
-        :raises InvalidIndexError: If index is out of valid range
-        """
-        # Validate seed
-        if (
-            not isinstance(seed, str)
-            or len(seed) != SEED_LENGTH
-            or not all(c in "0123456789abcdefABCDEF" for c in seed)
-        ):
-            logger.error(
-                f"Invalid seed format provided: length={len(seed) if isinstance(seed, str) else 'N/A'}"
-            )
-            raise InvalidSeedError("Seed must be a 64 character hex string")
-
-        # Validate index
-        if not isinstance(index, int) or index < 0 or index > MAX_INDEX:
-            logger.error(f"Invalid index provided: {index}")
-            raise InvalidIndexError(f"Index must be between 0 and {MAX_INDEX}")
-
         self.rpc = rpc
-        self.seed = seed.lower()  # Normalize to lowercase
-        self.index = index
         self.config = config or WalletConfig()
-
-        self.private_key = generate_account_private_key(self.seed, index)
-        self.account = get_account_id(private_key=self.private_key)
-        logger.debug(
-            f"Initialized wallet for account {self.account} with index {index}"
-        )
         self._init_account_state()
 
     def _init_account_state(self):
@@ -118,8 +158,236 @@ class NanoWallet:
         self.representative_block = None
         self.representative = None
         self.open_block = None
-
         self.receivable_blocks = {}
+        self.account = None
+
+    async def _account_info(self) -> Dict[str, Any]:
+        """Get account information from RPC"""
+        response = await self.rpc.account_info(
+            self.account,
+            weight=True,
+            receivable=True,
+            representative=True,
+            include_confirmed=False,
+        )
+        return response
+
+    async def _block_info(self, block_hash: str) -> Dict[str, Any]:
+        """Get block information"""
+        response = await self.rpc.blocks_info(
+            [block_hash], source=True, receive_hash=True, json_block=True
+        )
+        if block_not_found(response):
+            raise BlockNotFoundError(f"Block not found {block_hash}")
+        try_raise_error(response)
+        return response["blocks"][block_hash]
+
+
+class NanoWalletReadOnly(NanoWalletBase):
+    """Read-only implementation of NanoWallet"""
+
+    def __init__(
+        self,
+        rpc: NanoRpcTyped,
+        account: str,
+        config: Optional[WalletConfig] = None,
+    ):
+        """
+        Initialize read-only wallet with just an account address.
+
+        :param rpc: RPC client
+        :param account: Nano account address to monitor
+        :param config: Optional wallet configuration
+        """
+        super().__init__(rpc, config)
+        if not validate_account_id(account):
+            raise InvalidAccountError("Invalid account address")
+        self.account = account
+
+    # Implementation of read-only methods remains the same...
+    @handle_errors
+    @reload_after
+    async def account_history(
+        self, count: Optional[int] = -1, head: Optional[str] = None
+    ) -> NanoResult[List[Dict[str, Any]]]:
+        """
+        Get block history for the wallet's account.
+
+        Args:
+            count: Number of blocks to retrieve, -1 for all blocks (default)
+            head: Start from specific block hash instead of latest
+
+        Returns:
+            List of blocks with their details
+        """
+        try:
+            response = await self.rpc.account_history(
+                account=self.account, count=count, raw=True, head=head
+            )
+
+            if account_not_found(response):
+                return []
+
+            try_raise_error(response)
+
+            # Extract and normalize the history list
+            history = response.get("history", [])
+            for block in history:
+                block["amount_raw"] = int(block["amount"])
+                block["amount"] = raw_to_nano(block["amount_raw"])
+                block["balance_raw"] = int(block["balance"])
+                block["balance"] = raw_to_nano(block["balance_raw"])
+                block["timestamp"] = int(block["local_timestamp"])
+                block["height"] = int(block["height"])
+                block["confirmed"] = block["confirmed"] == "true"
+
+            return history
+
+        except Exception as e:
+            logger.error(f"Error retrieving account history: {str(e)}")
+            raise BlockNotFoundError("Could not retrieve account history")
+
+    @handle_errors
+    async def has_balance(self) -> NanoResult[bool]:
+        """
+        Checks if the account has available balance or receivable balance.
+
+        :return: True if balance or receivable balance is greater than zero, False otherwise.
+        """
+        await self.reload()
+        if (self.balance_raw and self.balance_raw > 0) or (
+            self.receivable_balance_raw and self.receivable_balance_raw > 0
+        ):
+            return True
+        return False
+
+    @handle_errors
+    @reload_after
+    async def balance_info(self) -> NanoResult[dict]:
+        """
+        Get detailed balance information for the account.
+
+        :return: Dictionary containing:
+            - balance: Current balance in Nano
+            - balance_raw: Current balance in raw
+            - receivable_balance: Pending receivable balance in Nano
+            - receivable_balance_raw: Pending receivable balance in raw
+        """
+        await self.reload()
+        return {
+            "balance": self.balance,
+            "balance_raw": self.balance_raw,
+            "receivable_balance": self.receivable_balance,
+            "receivable_balance_raw": self.receivable_balance_raw,
+        }
+
+    @handle_errors
+    async def list_receivables(
+        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
+    ) -> NanoResult[List[tuple]]:
+        """
+        Lists receivable blocks sorted by descending amount.
+
+        :param threshold_raw: Minimum amount to consider (in raw).
+        :return: A list of tuples containing block hashes and amounts.
+        """
+        await self.reload()
+
+        # If receivable_blocks is empty, return an empty list
+        if not self.receivable_blocks:
+            return []
+
+        # Filter blocks based on threshold if provided
+        filtered_blocks = self.receivable_blocks.items()
+        if threshold_raw is not None:
+            filtered_blocks = [
+                (block, amount)
+                for block, amount in filtered_blocks
+                if int(amount) >= threshold_raw
+            ]
+
+        # Sort the filtered blocks by descending amount
+        sorted_receivables = sorted(
+            filtered_blocks, key=lambda x: int(x[1]), reverse=True
+        )
+
+        return sorted_receivables
+
+    @handle_errors
+    async def reload(self):
+        """
+        Reloads the wallet's account information and receivable blocks.
+        """
+        response = await self.rpc.receivable(self.account, threshold=1)
+        try_raise_error(response)
+
+        self.receivable_blocks = response["blocks"]
+        account_info = await self._account_info()
+        if account_not_found(account_info) and self.receivable_blocks:
+            # New account with receivable blocks
+            self.receivable_balance_raw = sum(
+                int(amount) for amount in self.receivable_blocks.values()
+            )
+            self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
+        elif no_error(account_info):
+            self.balance = raw_to_nano(account_info["balance"])
+            self.balance_raw = int(account_info["balance"])
+            self.frontier_block = account_info["frontier"]
+            self.representative_block = account_info["representative_block"]
+            self.representative = account_info["representative"]
+            self.open_block = account_info["open_block"]
+            self.confirmation_height = int(account_info["confirmation_height"])
+            self.block_count = int(account_info["block_count"])
+            self.weight = raw_to_nano(account_info["weight"])
+            self.weight_raw = int(account_info["weight"])
+            self.receivable_balance = raw_to_nano(account_info["receivable"])
+            self.receivable_balance_raw = int(account_info["receivable"])
+            self.total_balance_raw = self.receivable_balance_raw + self.balance_raw
+
+    def to_string(self):
+        return (
+            f"NanoWallet:\n"
+            f"  Account: {self.account}\n"
+            f"  Balance: {self.balance} Nano\n"
+            f"  Balance raw: {self.balance_raw} raw\n"
+            f"  Receivable Balance: {self.receivable_balance} Nano\n"
+            f"  Receivable Balance raw: {self.receivable_balance_raw} raw\n"
+            f"  Voting Weight: {self.weight} Nano\n"
+            f"  Voting Weight raw: {self.weight_raw} raw\n"
+            f"  Representative: {self.representative}\n"
+            f"  Confirmation Height: {self.confirmation_height}\n"
+            f"  Block Count: {self.block_count}"
+        )
+
+    def __str__(self):
+        return (
+            f"NanoWallet:\n"
+            f"  Account: {self.account}\n"
+            f"  Balance raw: {self.balance_raw} raw\n"
+            f"  Receivable Balance raw: {self.receivable_balance_raw} raw"
+        )
+
+
+class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
+    """Key operations implementation of NanoWallet"""
+
+    def __init__(
+        self,
+        rpc: NanoRpcTyped,
+        private_key: str,
+        config: Optional[WalletConfig] = None,
+    ):
+        """
+        Initialize wallet with a private key.
+
+        :param rpc: RPC client
+        :param private_key: Private key for signing transactions
+        :param config: Optional wallet configuration
+        """
+        # First get the account from the private key
+        account = get_account_id(private_key=private_key)
+        super().__init__(rpc, account, config)
+        self.private_key = private_key
 
     async def _build_block(
         self,
@@ -257,37 +525,6 @@ class NanoWallet:
         logger.debug(f"Confirmation wait timed out after {time.time() - start_time}s")
         return False
 
-    @handle_errors
-    async def reload(self):
-        """
-        Reloads the wallet's account information and receivable blocks.
-        """
-        response = await self.rpc.receivable(self.account, threshold=1)
-        try_raise_error(response)
-
-        self.receivable_blocks = response["blocks"]
-        account_info = await self._account_info()
-        if account_not_found(account_info) and self.receivable_blocks:
-            # New account with receivable blocks
-            self.receivable_balance_raw = sum(
-                int(amount) for amount in self.receivable_blocks.values()
-            )
-            self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
-        elif no_error(account_info):
-            self.balance = raw_to_nano(account_info["balance"])
-            self.balance_raw = int(account_info["balance"])
-            self.frontier_block = account_info["frontier"]
-            self.representative_block = account_info["representative_block"]
-            self.representative = account_info["representative"]
-            self.open_block = account_info["open_block"]
-            self.confirmation_height = int(account_info["confirmation_height"])
-            self.block_count = int(account_info["block_count"])
-            self.weight = raw_to_nano(account_info["weight"])
-            self.weight_raw = int(account_info["weight"])
-            self.receivable_balance = raw_to_nano(account_info["receivable"])
-            self.receivable_balance_raw = int(account_info["receivable"])
-            self.total_balance_raw = self.receivable_balance_raw + self.balance_raw
-
     async def _process_block(self, block: Block, operation: str) -> str:
         """
         Process a block and handle errors consistently.
@@ -306,6 +543,32 @@ class NanoWallet:
         except Exception as e:
             logger.error(f"Failed to process {operation}: {str(e)}")
             raise
+
+    async def _get_block_params(self) -> Dict[str, Any]:
+        """
+        Get common parameters for block creation.
+
+        :return: Dictionary with previous block hash, balance, and representative
+        :raises ValueError: If account info cannot be retrieved
+        """
+        account_info = await self._account_info()
+        if account_not_found(account_info):
+            logger.debug(f"Account {self.account} not found, using default parameters")
+            return {
+                "previous": ZERO_HASH,
+                "balance": 0,
+                "representative": self.config.default_representative,
+            }
+
+        logger.debug(
+            f"Retrieved block params for {self.account}: balance={account_info['balance']}"
+        )
+        return {
+            "previous": account_info["frontier"],
+            # this is actually balance_raw
+            "balance": int(account_info["balance"]),
+            "representative": account_info["representative"],
+        }
 
     @handle_errors
     @reload_after
@@ -401,38 +664,6 @@ class NanoWallet:
 
         response = await self.send_raw(destination_account, self.balance_raw)
         return response.unwrap()
-
-    @handle_errors
-    async def list_receivables(
-        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
-    ) -> NanoResult[List[tuple]]:
-        """
-        Lists receivable blocks sorted by descending amount.
-
-        :param threshold_raw: Minimum amount to consider (in raw).
-        :return: A list of tuples containing block hashes and amounts.
-        """
-        await self.reload()
-
-        # If receivable_blocks is empty, return an empty list
-        if not self.receivable_blocks:
-            return []
-
-        # Filter blocks based on threshold if provided
-        filtered_blocks = self.receivable_blocks.items()
-        if threshold_raw is not None:
-            filtered_blocks = [
-                (block, amount)
-                for block, amount in filtered_blocks
-                if int(amount) >= threshold_raw
-            ]
-
-        # Sort the filtered blocks by descending amount
-        sorted_receivables = sorted(
-            filtered_blocks, key=lambda x: int(x[1]), reverse=True
-        )
-
-        return sorted_receivables
 
     @handle_errors
     @reload_after
@@ -555,130 +786,50 @@ class NanoWallet:
         result = response.unwrap()
         return result
 
-    @handle_errors
-    @reload_after
-    async def account_history(
-        self, count: Optional[int] = -1, head: Optional[str] = None
-    ) -> NanoResult[List[Dict[str, Any]]]:
+
+class NanoWallet(NanoWalletKey):
+    """Full implementation of NanoWallet with seed-based initialization"""
+
+    def __init__(
+        self,
+        rpc: NanoRpcTyped,
+        seed: str,
+        index: int,
+        config: Optional[WalletConfig] = None,
+    ):
         """
-        Get block history for the wallet's account.
+        Initialize wallet with a seed and index.
 
-        Args:
-            count: Number of blocks to retrieve, -1 for all blocks (default)
-            head: Start from specific block hash instead of latest
-
-        Returns:
-            List of blocks with their details
+        :param rpc: RPC client
+        :param seed: Wallet seed (64 character hex string)
+        :param index: Account index
+        :param config: Optional wallet configuration
         """
-        try:
-            response = await self.rpc.account_history(
-                account=self.account, count=count, raw=True, head=head
-            )
-
-            if account_not_found(response):
-                return []
-
-            try_raise_error(response)
-
-            # Extract and normalize the history list
-            history = response.get("history", [])
-            for block in history:
-                block["amount_raw"] = int(block["amount"])
-                block["amount"] = raw_to_nano(block["amount_raw"])
-                block["balance_raw"] = int(block["balance"])
-                block["balance"] = raw_to_nano(block["balance_raw"])
-                block["timestamp"] = int(block["local_timestamp"])
-                block["height"] = int(block["height"])
-                block["confirmed"] = block["confirmed"] == "true"
-
-            return history
-
-        except Exception as e:
-            logger.error(f"Error retrieving account history: {str(e)}")
-            raise BlockNotFoundError("Could not retrieve account history")
-
-    @handle_errors
-    async def has_balance(self) -> NanoResult[bool]:
-        """
-        Checks if the account has available balance or receivable balance.
-
-        :return: True if balance or receivable balance is greater than zero, False otherwise.
-        """
-        await self.reload()
-        if (self.balance_raw and self.balance_raw > 0) or (
-            self.receivable_balance_raw and self.receivable_balance_raw > 0
+        # Validate seed
+        if (
+            not isinstance(seed, str)
+            or len(seed) != SEED_LENGTH
+            or not all(c in "0123456789abcdefABCDEF" for c in seed)
         ):
-            return True
-        return False
+            logger.error(
+                f"Invalid seed format provided: length={len(seed) if isinstance(seed, str) else 'N/A'}"
+            )
+            raise InvalidSeedError("Seed must be a 64 character hex string")
 
-    @handle_errors
-    @reload_after
-    async def balance_info(self) -> NanoResult[dict]:
-        """
-        Get detailed balance information for the account.
+        # Validate index
+        if not isinstance(index, int) or index < 0 or index > MAX_INDEX:
+            logger.error(f"Invalid index provided: {index}")
+            raise InvalidIndexError(f"Index must be between 0 and {MAX_INDEX}")
 
-        :return: Dictionary containing:
-            - balance: Current balance in Nano
-            - balance_raw: Current balance in raw
-            - receivable_balance: Pending receivable balance in Nano
-            - receivable_balance_raw: Pending receivable balance in raw
-        """
-        await self.reload()
-        return {
-            "balance": self.balance,
-            "balance_raw": self.balance_raw,
-            "receivable_balance": self.receivable_balance,
-            "receivable_balance_raw": self.receivable_balance_raw,
-        }
+        # Generate private key from seed and index
+        private_key = generate_account_private_key(seed.lower(), index)
 
-    def to_string(self):
-        return (
-            f"NanoWallet:\n"
-            f"  Account: {self.account}\n"
-            f"  Balance: {self.balance} Nano\n"
-            f"  Balance raw: {self.balance_raw} raw\n"
-            f"  Receivable Balance: {self.receivable_balance} Nano\n"
-            f"  Receivable Balance raw: {self.receivable_balance_raw} raw\n"
-            f"  Voting Weight: {self.weight} Nano\n"
-            f"  Voting Weight raw: {self.weight_raw} raw\n"
-            f"  Representative: {self.representative}\n"
-            f"  Confirmation Height: {self.confirmation_height}\n"
-            f"  Block Count: {self.block_count}"
-        )
+        # Initialize with the generated private key
+        super().__init__(rpc, private_key, config)
 
-    def __str__(self):
-        return (
-            f"NanoWallet:\n"
-            f"  Account: {self.account}\n"
-            f"  Balance raw: {self.balance_raw} raw\n"
-            f"  Receivable Balance raw: {self.receivable_balance_raw} raw"
-        )
-
-    async def _get_block_params(self) -> Dict[str, Any]:
-        """
-        Get common parameters for block creation.
-
-        :return: Dictionary with previous block hash, balance, and representative
-        :raises ValueError: If account info cannot be retrieved
-        """
-        account_info = await self._account_info()
-        if account_not_found(account_info):
-            logger.debug(f"Account {self.account} not found, using default parameters")
-            return {
-                "previous": ZERO_HASH,
-                "balance": 0,
-                "representative": self.config.default_representative,
-            }
-
-        logger.debug(
-            f"Retrieved block params for {self.account}: balance={account_info['balance']}"
-        )
-        return {
-            "previous": account_info["frontier"],
-            # this is actually balance_raw
-            "balance": int(account_info["balance"]),
-            "representative": account_info["representative"],
-        }
+        # Store seed and index for reference
+        self.seed = seed.lower()
+        self.index = index
 
 
 class WalletUtils:
