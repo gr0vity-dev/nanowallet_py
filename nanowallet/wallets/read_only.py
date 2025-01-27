@@ -1,7 +1,6 @@
 # nanowallet/wallets/read_only.py
 from typing import Optional, List, Dict, Any, Protocol
-from decimal import Decimal
-from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
+from .rpc import NanoRpcProtocol
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..utils.conversion import raw_to_nano
 from ..utils.decorators import handle_errors, reload_after
@@ -55,7 +54,7 @@ class NanoWalletReadOnly(NanoWalletBase):
 
     def __init__(
         self,
-        rpc: NanoWalletRpc,
+        rpc: NanoRpcProtocol,
         account: str,
         config: Optional[WalletConfig] = None,
     ):

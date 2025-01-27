@@ -1,7 +1,7 @@
 # nanowallet/wallets/base.py
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
-from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
+from .rpc import NanoWalletRpc, NanoRpcProtocol
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..errors import (
     try_raise_error,

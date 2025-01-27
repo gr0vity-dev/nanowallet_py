@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import AsyncMock, patch, Mock
-from nanowallet.rpc.wallet_rpc import NanoWalletRpc
-from nanorpc.client import NanoRpcTyped
 
-from nanowallet.wallets.seed_based import NanoWallet
+
+from nanowallet.wallets import NanoWallet, NanoWalletRpc
 from nanowallet.wallets.base import WalletUtils
+from nanorpc.client import NanoRpcTyped
 
 from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
@@ -54,7 +54,7 @@ def mock_rpc(mock_rpc_typed):
 
 
 @pytest.mark.asyncio
-async def test_init(mock_rpc, mock_rpc_typed, seed, index, account, private_key):
+async def test_init(mock_rpc, seed, index, account, private_key):
 
     wallet = NanoWallet(mock_rpc, seed, index)
 

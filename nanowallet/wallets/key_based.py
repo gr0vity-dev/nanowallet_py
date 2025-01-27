@@ -28,7 +28,7 @@ from ..errors import (
     TimeoutException,
 )
 from .read_only import NanoWalletReadOnly, NanoWalletReadOnlyProtocol
-from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
+from .rpc import NanoWalletRpc, NanoRpcProtocol
 
 # Configure logging
 logger = logging.getLogger(__name__)
