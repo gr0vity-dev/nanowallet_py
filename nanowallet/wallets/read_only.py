@@ -1,5 +1,4 @@
 from typing import Optional, List, Dict, Any, Protocol
-from decimal import Decimal
 from nanorpc.client import NanoRpcTyped
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..utils.conversion import raw_to_nano
@@ -9,7 +8,6 @@ from ..errors import (
     account_not_found,
     no_error,
     InvalidAccountError,
-    BlockNotFoundError,
 )
 from nano_lib_py import validate_account_id
 from .base import NanoWalletBase
@@ -31,29 +29,23 @@ class NanoWalletReadOnlyProtocol(Protocol):
         self, count: Optional[int] = -1, head: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get block history for the wallet's account"""
-        ...
 
     async def has_balance(self) -> bool:
         """Check if account has available balance"""
-        ...
 
     async def balance_info(self) -> WalletBalance:
         """Get detailed balance information"""
-        ...
 
     async def account_info(self) -> AccountInfo:
         """Get detailed account information"""
-        ...
 
     async def list_receivables(
         self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
     ) -> List[tuple]:
         """List receivable blocks"""
-        ...
 
     async def reload(self):
         """Reload account information"""
-        ...
 
 
 class NanoWalletReadOnly(NanoWalletBase):
@@ -116,8 +108,8 @@ class NanoWalletReadOnly(NanoWalletBase):
             return history
 
         except Exception as e:
-            logger.error(f"Error retrieving account history: {str(e)}")
-            raise BlockNotFoundError("Could not retrieve account history")
+            logger.error("Error retrieving account history: %s", str(e))
+            raise e
 
     @handle_errors
     async def has_balance(self) -> bool:
@@ -190,6 +182,7 @@ class NanoWalletReadOnly(NanoWalletBase):
         """
         Reloads the wallet's account information and receivable blocks.
         """
+        # pylint: disable=attribute-defined-outside-init
         response = await self.rpc.receivable(self.account, threshold=1)
         try_raise_error(response)
 

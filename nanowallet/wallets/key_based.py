@@ -13,7 +13,7 @@ from nano_lib_py import (
 )
 
 
-from ..models import WalletConfig, WalletBalance, AccountInfo
+from ..models import WalletConfig
 from ..utils.conversion import raw_to_nano, nano_to_raw
 from ..utils.validation import validate_account_id, validate_nano_amount
 from ..utils.decorators import handle_errors, reload_after
@@ -43,15 +43,12 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
 
     async def send(self, destination_account: str, amount: Decimal | str | int) -> str:
         """Sends Nano to a destination account"""
-        ...
 
     async def send_raw(self, destination_account: str, amount: int) -> str:
         """Sends Nano to a destination account"""
-        ...
 
     async def receive(self, source_hash: str) -> str:
         """Receives Nano from a source account"""
-        ...
 
     async def sweep(
         self,
@@ -60,13 +57,11 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
         threshold_raw: int = DEFAULT_THRESHOLD_RAW,
     ) -> str:
         """Transfers all funds from the current account to the destination account"""
-        ...
 
     async def receive_by_hash(
         self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
     ) -> dict:
         """Receives a specific block by its hash"""
-        ...
 
     async def receive_all(
         self,
@@ -75,11 +70,9 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
         timeout: int = 30,
     ) -> list:
         """Receives all pending receivable blocks"""
-        ...
 
     async def refund_first_sender(self) -> str:
         """Sends remaining funds to the account opener"""
-        ...
 
 
 class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
@@ -177,7 +170,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         attempt = 1
 
         logger.debug(
-            f"Starting confirmation wait for {block_hash} with timeout={timeout}"
+            "Starting confirmation wait for %s with timeout=%s", block_hash, timeout
         )
 
         while (time.time() - start_time) < timeout:
@@ -185,7 +178,10 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
                 block_info = await self._block_info(block_hash)
                 confirmed = block_info.get("confirmed", "false") == "true"
                 logger.debug(
-                    f"Confirmation check attempt {attempt}: confirmed={confirmed}, elapsed={time.time() - start_time}"
+                    "Confirmation check attempt %s: confirmed=%s, elapsed=%s",
+                    attempt,
+                    confirmed,
+                    time.time() - start_time,
                 )
 
                 if confirmed:
@@ -198,14 +194,18 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
 
             except BlockNotFoundError:
                 logger.debug(
-                    f"Block not found on attempt {attempt}, retrying after {delay}s"
+                    "Block not found on attempt %s, retrying after %s seconds",
+                    attempt,
+                    delay,
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)
                 attempt += 1
                 continue
 
-        logger.debug(f"Confirmation wait timed out after {time.time() - start_time}s")
+        logger.debug(
+            "Confirmation wait timed out after %s seconds", time.time() - start_time
+        )
         return False
 
     async def _process_block(self, block: Block, operation: str) -> str:
@@ -221,10 +221,10 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             response = await self.rpc.process(block.json())
             try_raise_error(response)
             block_hash = response["hash"]
-            logger.debug(f"Successfully processed {operation}, hash: {block_hash}")
+            logger.debug("Successfully processed %s, hash: %s", operation, block_hash)
             return block_hash
         except Exception as e:
-            logger.error(f"Failed to process {operation}: {str(e)}")
+            logger.error("Failed to process %s: %s", operation, str(e))
             raise
 
     async def _get_block_params(self) -> Dict[str, Any]:
@@ -236,7 +236,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         """
         account_info = await self._fetch_account_info()
         if account_not_found(account_info):
-            logger.debug(f"Account {self.account} not found, using default parameters")
+            logger.debug("Account %s not found, using default parameters", self.account)
             return {
                 "previous": ZERO_HASH,
                 "balance": 0,
@@ -244,7 +244,9 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             }
 
         logger.debug(
-            f"Retrieved block params for {self.account}: balance={account_info['balance']}"
+            "Retrieved block params for %s: balance=%s",
+            self.account,
+            account_info["balance"],
         )
         return {
             "previous": account_info["frontier"],
@@ -278,7 +280,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
 
     @handle_errors
     @reload_after
-    async def send_raw(self, destination_account: str, amount_raw: int) -> str:
+    async def send_raw(self, destination_account: str, amount_raw: int | str) -> str:
         """
         Sends Nano to a destination account.
 
@@ -288,18 +290,18 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :raises InvalidAccountError: If destination account is invalid
         :raises InsufficientBalanceError: If insufficient balance
         """
-        logger.debug(f"Attempting to send {amount_raw} raw to {destination_account}")
+        logger.debug("Attempting to send %s raw to %s", amount_raw, destination_account)
 
         if not destination_account:
-            logger.error(f"Invalid destination account: {destination_account}")
+            logger.error("Invalid destination account: %s", destination_account)
             raise InvalidAccountError("Destination can't be None")
 
         if not validate_account_id(destination_account):
-            logger.error(f"Invalid destination account: {destination_account}")
+            logger.error("Invalid destination account: %s", destination_account)
             raise InvalidAccountError("Invalid destination account.")
 
         params = await self._get_block_params()
-        new_balance = params["balance"] - amount_raw
+        new_balance = params["balance"] - int(amount_raw)
 
         if params["balance"] == 0 or new_balance < 0:
             msg = f"Insufficient balance for send! balance:{params['balance']} send_amount:{amount_raw}"
@@ -352,17 +354,20 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
     ) -> dict:
         """Receives a specific block by its hash."""
         logger.debug(
-            f"Starting receive_by_hash for block {block_hash}, wait_confirmation={wait_confirmation}, timeout={timeout}"
+            "Starting receive_by_hash for block %s, wait_confirmation=%s, timeout=%s",
+            block_hash,
+            wait_confirmation,
+            timeout,
         )
 
         try:
             send_block_info = await self._block_info(block_hash)
             amount_raw = int(send_block_info["amount"])
-            logger.debug(f"Block {block_hash} contains {amount_raw} raw")
+            logger.debug("Block %s contains %s raw", block_hash, amount_raw)
 
             params = await self._get_block_params()
             new_balance = params["balance"] + amount_raw
-            logger.debug(f"Building block with new_balance={new_balance}")
+            logger.debug("Building block with new_balance=%s", new_balance)
 
             block = await self._build_block(
                 previous=params["previous"],
@@ -374,22 +379,26 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             received_hash = await self._process_block(
                 block, f"receive of {amount_raw} raw from block {block_hash}"
             )
-            logger.debug(f"Block processed with hash {received_hash}")
+            logger.debug("Block processed with hash %s", received_hash)
 
             if wait_confirmation:
                 start_time = time.time()
                 logger.debug(
-                    f"Starting confirmation wait at {start_time}, timeout={timeout}"
+                    "Starting confirmation wait at %s, timeout=%s",
+                    start_time,
+                    timeout,
                 )
 
                 confirmed = await self._wait_for_confirmation(received_hash, timeout)
                 elapsed = time.time() - start_time
                 logger.debug(
-                    f"Confirmation wait finished. confirmed={confirmed}, elapsed={elapsed}"
+                    "Confirmation wait finished. confirmed=%s, elapsed=%s",
+                    confirmed,
+                    elapsed,
                 )
 
                 if not confirmed:
-                    logger.debug(f"Confirmation timeout, raising TimeoutError")
+                    logger.debug("Confirmation timeout, raising TimeoutError")
                     raise TimeoutException(
                         f"Block {received_hash} not confirmed within {timeout} seconds"
                     )
@@ -401,11 +410,13 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
                 "source": send_block_info["block_account"],
                 "confirmed": wait_confirmation and confirmed,
             }
-            logger.debug(f"Returning result: {result}")
+            logger.debug("Returning result: %s", result)
             return result
 
         except Exception as e:
-            logger.debug(f"Exception in receive_by_hash: {type(e).__name__}: {str(e)}")
+            logger.debug(
+                "Exception in receive_by_hash: %s: %s", type(e).__name__, str(e)
+            )
             raise
 
     @handle_errors

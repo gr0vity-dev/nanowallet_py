@@ -1,6 +1,7 @@
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Union
 from nanowallet.errors import InvalidAmountError
+
 
 RAW_PER_NANO = Decimal("10") ** 30
 

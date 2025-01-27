@@ -26,6 +26,7 @@ def validate_nano_amount(amount: Union[Decimal, str, int]) -> Decimal:
         try:
             amount_decimal = Decimal(str(amount))
         except:
+            # pylint: disable=raise-missing-from
             raise InvalidAmountError("Invalid amount format")
     elif isinstance(amount, Decimal):
         amount_decimal = amount

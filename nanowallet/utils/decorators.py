@@ -50,7 +50,6 @@ def handle_errors(
             return NanoResult(error=e.message, error_code=e.code)
         except Exception as e:
             # For any other exception, preserve the original message so existing tests pass.
-            # The test expects the original error message (e.g. ValueError("No funds available to refund."))
             logger.error(
                 "Unexpected error in %s: %s", func.__name__, str(e), exc_info=True
             )
