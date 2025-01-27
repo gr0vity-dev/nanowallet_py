@@ -1,11 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, patch, Mock
 from nanorpc.client import NanoRpcTyped
-from nanowallet.nanowallet import NanoWallet, WalletUtils
 
-from nanowallet.utils import NanoResult, handle_errors, reload_after
+from nanowallet.wallets.seed_based import NanoWallet
+from nanowallet.wallets.base import WalletUtils
+
+from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
+from nanowallet.utils.conversion import raw_to_nano, nano_to_raw
 
 
 nano_to_raw = WalletUtils.nano_to_raw
@@ -200,7 +203,7 @@ async def test_reload_no_receivables(mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_send(mock_block, mock_rpc, seed, index):
 
     mock_rpc.account_info.return_value = {
@@ -224,13 +227,14 @@ async def test_send(mock_block, mock_rpc, seed, index):
     )
 
     assert result.success == True
+    print(result.value)
     assert result.value == "processed_block_hash"
     mock_block.assert_called()
     mock_rpc.process.assert_called()
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_send_raw(mock_block, mock_rpc, seed, index, account, private_key):
 
     mock_rpc.account_info.return_value = {
@@ -350,7 +354,7 @@ async def test_list_receivables_threshold(mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_receive_by_hash(mock_block, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {
@@ -389,9 +393,10 @@ async def test_receive_by_hash(mock_block, mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_receive_by_hash_wait_conf(mock_block, mock_rpc, seed, index):
     # Mock initial block info for receiving
+
     mock_rpc.blocks_info.side_effect = [
         # First call - for the block to receive
         {
@@ -445,7 +450,7 @@ async def test_receive_by_hash_wait_conf(mock_block, mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_receive_by_hash_new_account(mock_block, mock_rpc, seed, index):
 
     mock_rpc.blocks_info.return_value = {
@@ -480,7 +485,7 @@ async def test_receive_by_hash_new_account(mock_block, mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.nanowallet.Block")
+@patch("nanowallet.wallets.key_based.Block")
 async def test_receive_by_hash_new_account_with_conf(mock_block, mock_rpc, seed, index):
     # Mock initial block info for receiving, and subsequent confirmation check
     mock_rpc.blocks_info.side_effect = [
