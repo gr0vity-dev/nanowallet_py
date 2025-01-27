@@ -13,7 +13,7 @@ from nano_lib_py import (
 )
 
 
-from ..models import WalletConfig
+from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..utils.conversion import raw_to_nano, nano_to_raw
 from ..utils.validation import validate_account_id, validate_nano_amount
 from ..utils.decorators import handle_errors, reload_after
@@ -234,7 +234,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: Dictionary with previous block hash, balance, and representative
         :raises ValueError: If account info cannot be retrieved
         """
-        account_info = await self._account_info()
+        account_info = await self._fetch_account_info()
         if account_not_found(account_info):
             logger.debug(f"Account {self.account} not found, using default parameters")
             return {

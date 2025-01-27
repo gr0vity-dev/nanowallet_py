@@ -6,7 +6,7 @@ from .wallets import (
     NanoWalletKey,
     NanoWalletKeyProtocol,
 )
-from .models import WalletConfig
+from .models import WalletConfig, WalletBalance, AccountInfo
 from .errors import (
     RpcError,
     InvalidSeedError,
@@ -23,11 +23,14 @@ __all__ = [
     # Wallet classes
     "NanoWalletBase",
     "NanoWalletReadOnly",
-    "NanoWalletReadOnlyProtocol",
     "NanoWalletKey",
+    # Protocols
+    "NanoWalletReadOnlyProtocol",
     "NanoWalletKeyProtocol",
     # Models
     "WalletConfig",
+    "WalletBalance",
+    "AccountInfo",
     # Errors
     "RpcError",
     "InvalidSeedError",

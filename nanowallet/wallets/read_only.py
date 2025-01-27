@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Any, Protocol
 from decimal import Decimal
 from nanorpc.client import NanoRpcTyped
-from ..models import WalletConfig
+from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..utils import raw_to_nano, handle_errors, reload_after
 from ..errors import (
     try_raise_error,
@@ -37,8 +37,12 @@ class NanoWalletReadOnlyProtocol(Protocol):
         """Check if account has available balance"""
         ...
 
-    async def balance_info(self) -> dict:
+    async def balance_info(self) -> WalletBalance:
         """Get detailed balance information"""
+        ...
+
+    async def account_info(self) -> AccountInfo:
+        """Get detailed account information"""
         ...
 
     async def list_receivables(
@@ -123,31 +127,31 @@ class NanoWalletReadOnly(NanoWalletBase):
         :return: True if balance or receivable balance is greater than zero, False otherwise.
         """
         await self.reload()
-        if (self.balance_raw and self.balance_raw > 0) or (
-            self.receivable_balance_raw and self.receivable_balance_raw > 0
-        ):
-            return True
-        return False
+        return (self._balance_info.balance_raw > 0) or (
+            self._balance_info.receivable_raw > 0
+        )
 
     @handle_errors
     @reload_after
-    async def balance_info(self) -> dict:
+    async def balance_info(self) -> WalletBalance:
         """
         Get detailed balance information for the account.
 
-        :return: Dictionary containing:
-            - balance: Current balance in Nano
-            - balance_raw: Current balance in raw
-            - receivable_balance: Pending receivable balance in Nano
-            - receivable_balance_raw: Pending receivable balance in raw
+        :return: WalletBalance object containing current and receivable balances
         """
         await self.reload()
-        return {
-            "balance": self.balance,
-            "balance_raw": self.balance_raw,
-            "receivable_balance": self.receivable_balance,
-            "receivable_balance_raw": self.receivable_balance_raw,
-        }
+        return self._balance_info
+
+    @handle_errors
+    @reload_after
+    async def account_info(self) -> AccountInfo:
+        """
+        Get detailed account information.
+
+        :return: AccountInfo object containing account metadata
+        """
+        await self.reload()
+        return self._account_info
 
     @handle_errors
     async def list_receivables(
@@ -189,48 +193,58 @@ class NanoWalletReadOnly(NanoWalletBase):
         response = await self.rpc.receivable(self.account, threshold=1)
         try_raise_error(response)
 
-        self.receivable_blocks = response["blocks"]
-        account_info = await self._account_info()
+        self.receivable_blocks = response["blocks"] if "blocks" in response else {}
+        account_info = await self._fetch_account_info()
+
         if account_not_found(account_info) and self.receivable_blocks:
             # New account with receivable blocks
-            self.receivable_balance_raw = sum(
-                int(amount) for amount in self.receivable_blocks.values()
+            self._balance_info = WalletBalance(
+                balance_raw=0,
+                receivable_raw=sum(
+                    int(amount) for amount in self.receivable_blocks.values()
+                ),
             )
-            self.receivable_balance = raw_to_nano(self.receivable_balance_raw)
+            self._account_info = AccountInfo()  # Empty account info
         elif no_error(account_info):
-            self.balance = raw_to_nano(account_info["balance"])
-            self.balance_raw = int(account_info["balance"])
-            self.frontier_block = account_info["frontier"]
-            self.representative_block = account_info["representative_block"]
-            self.representative = account_info["representative"]
-            self.open_block = account_info["open_block"]
-            self.confirmation_height = int(account_info["confirmation_height"])
-            self.block_count = int(account_info["block_count"])
-            self.weight = raw_to_nano(account_info["weight"])
-            self.weight_raw = int(account_info["weight"])
-            self.receivable_balance = raw_to_nano(account_info["receivable"])
-            self.receivable_balance_raw = int(account_info["receivable"])
-            self.total_balance_raw = self.receivable_balance_raw + self.balance_raw
+            # Update balance info
+            self._balance_info = WalletBalance(
+                balance_raw=int(account_info["balance"]),
+                receivable_raw=int(account_info["receivable"]),
+            )
+
+            # Update account info
+            self._account_info = AccountInfo(
+                frontier_block=account_info["frontier"],
+                representative=account_info["representative"],
+                representative_block=account_info["representative_block"],
+                open_block=account_info["open_block"],
+                confirmation_height=int(account_info["confirmation_height"]),
+                block_count=int(account_info["block_count"]),
+                weight_raw=int(account_info["weight"]),
+            )
+
+        # Update legacy attributes for backward compatibility
+        self._update_legacy_attributes()
 
     def to_string(self):
         return (
             f"NanoWallet:\n"
             f"  Account: {self.account}\n"
-            f"  Balance: {self.balance} Nano\n"
-            f"  Balance raw: {self.balance_raw} raw\n"
-            f"  Receivable Balance: {self.receivable_balance} Nano\n"
-            f"  Receivable Balance raw: {self.receivable_balance_raw} raw\n"
-            f"  Voting Weight: {self.weight} Nano\n"
-            f"  Voting Weight raw: {self.weight_raw} raw\n"
-            f"  Representative: {self.representative}\n"
-            f"  Confirmation Height: {self.confirmation_height}\n"
-            f"  Block Count: {self.block_count}"
+            f"  Balance: {self._balance_info.balance} Nano\n"
+            f"  Balance raw: {self._balance_info.balance_raw} raw\n"
+            f"  Receivable Balance: {self._balance_info.receivable} Nano\n"
+            f"  Receivable Balance raw: {self._balance_info.receivable_raw} raw\n"
+            f"  Voting Weight: {self._account_info.weight} Nano\n"
+            f"  Voting Weight raw: {self._account_info.weight_raw} raw\n"
+            f"  Representative: {self._account_info.representative}\n"
+            f"  Confirmation Height: {self._account_info.confirmation_height}\n"
+            f"  Block Count: {self._account_info.block_count}"
         )
 
     def __str__(self):
         return (
             f"NanoWallet:\n"
             f"  Account: {self.account}\n"
-            f"  Balance raw: {self.balance_raw} raw\n"
-            f"  Receivable Balance raw: {self.receivable_balance_raw} raw"
+            f"  Balance raw: {self._balance_info.balance_raw} raw\n"
+            f"  Receivable Balance raw: {self._balance_info.receivable_raw} raw"
         )

@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
 from nanorpc.client import NanoRpcTyped
-from ..models import WalletConfig
+from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..errors import (
     try_raise_error,
     block_not_found,
@@ -25,23 +25,35 @@ class NanoWalletBase:
 
     def _init_account_state(self):
         """Initialize account state variables"""
-        self.balance = Decimal("0.0")
-        self.weight = Decimal("0.0")
-        self.balance_raw = 0
-        self.weight_raw = 0
-        self.receivable_balance = Decimal("0.0")
-        self.receivable_balance_raw = 0
-        self.confirmation_height = 0
-        self.block_count = 0
-
-        self.frontier_block = None
-        self.representative_block = None
-        self.representative = None
-        self.open_block = None
-        self.receivable_blocks = {}
         self.account = None
+        self.receivable_blocks = {}
 
-    async def _account_info(self) -> Dict[str, Any]:
+        # Initialize data models
+        self._balance_info = WalletBalance()
+        self._account_info = AccountInfo()
+
+        # For backward compatibility
+        self._update_legacy_attributes()
+
+    def _update_legacy_attributes(self):
+        """Update legacy attributes from data models for backward compatibility"""
+        # Balance related
+        self.balance = self._balance_info.balance
+        self.balance_raw = self._balance_info.balance_raw
+        self.receivable_balance = self._balance_info.receivable
+        self.receivable_balance_raw = self._balance_info.receivable_raw
+
+        # Account related
+        self.weight = self._account_info.weight
+        self.weight_raw = self._account_info.weight_raw
+        self.confirmation_height = self._account_info.confirmation_height
+        self.block_count = self._account_info.block_count
+        self.frontier_block = self._account_info.frontier_block
+        self.representative_block = self._account_info.representative_block
+        self.representative = self._account_info.representative
+        self.open_block = self._account_info.open_block
+
+    async def _fetch_account_info(self) -> Dict[str, Any]:
         """Get account information from RPC"""
         response = await self.rpc.account_info(
             self.account,
