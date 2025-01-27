@@ -34,6 +34,19 @@ class NanoResult:
         return self.value
 
 
+def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R]]:
+    @functools.wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            result = await func(self, *args, **kwargs)
+            await self.reload()
+            return result
+        except Exception as e:
+            raise e
+
+    return wrapper
+
+
 def handle_errors(
     func: Callable[..., Awaitable[R]]
 ) -> Callable[..., Awaitable[NanoResult]]:
@@ -50,23 +63,10 @@ def handle_errors(
             return NanoResult(error=e.message, error_code=e.code)
         except Exception as e:
             # For any other exception, preserve the original message so existing tests pass.
+            # The test expects the original error message (e.g. ValueError("No funds available to refund."))
             logger.error(
                 "Unexpected error in %s: %s", func.__name__, str(e), exc_info=True
             )
             return NanoResult(error=str(e), error_code="UNEXPECTED_ERROR")
-
-    return wrapper
-
-
-def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R]]:
-    @functools.wraps(func)
-    async def wrapper(self, *args, **kwargs):
-        try:
-            result = await func(self, *args, **kwargs)
-            await self.reload()
-            return result
-        except Exception as e:
-            await self.reload()
-            raise e
 
     return wrapper

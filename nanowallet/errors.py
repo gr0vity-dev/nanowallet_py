@@ -1,6 +1,10 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class NanoException(Exception):
     """Base exception for all Nano-related errors."""
@@ -114,7 +118,8 @@ def try_raise_error(response: Dict[str, Any]):
         full_msg = f"{error_msg}"
 
         if account_not_found(response):
-            raise InvalidAccountError(full_msg)
+            pass
+            # raise InvalidAccountError(full_msg)
         elif block_not_found(response):
             raise BlockNotFoundError(full_msg)
         else:

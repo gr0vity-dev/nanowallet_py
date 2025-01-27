@@ -1,6 +1,7 @@
 # nanowallet/wallets/read_only.py
 from typing import Optional, List, Dict, Any, Protocol
-from nanorpc.client import NanoRpcTyped
+from decimal import Decimal
+from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..utils.conversion import raw_to_nano
 from ..utils.decorators import handle_errors, reload_after
@@ -54,7 +55,7 @@ class NanoWalletReadOnly(NanoWalletBase):
 
     def __init__(
         self,
-        rpc: NanoRpcTyped,
+        rpc: NanoWalletRpc,
         account: str,
         config: Optional[WalletConfig] = None,
     ):
@@ -70,8 +71,8 @@ class NanoWalletReadOnly(NanoWalletBase):
             raise InvalidAccountError("Invalid account address")
         self.account = account
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -124,8 +125,8 @@ class NanoWalletReadOnly(NanoWalletBase):
             self._balance_info.receivable_raw > 0
         )
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def balance_info(self) -> WalletBalance:
         """
         Get detailed balance information for the account.
@@ -135,8 +136,8 @@ class NanoWalletReadOnly(NanoWalletBase):
         await self.reload()
         return self._balance_info
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def account_info(self) -> AccountInfo:
         """
         Get detailed account information.

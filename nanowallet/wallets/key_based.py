@@ -28,6 +28,7 @@ from ..errors import (
     TimeoutException,
 )
 from .read_only import NanoWalletReadOnly, NanoWalletReadOnlyProtocol
+from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
 
     def __init__(
         self,
-        rpc: NanoRpcTyped,
+        rpc: NanoWalletRpc,
         private_key: str,
         config: Optional[WalletConfig] = None,
     ):
@@ -116,6 +117,11 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: Block instance
         :raises ValueError: If parameters are invalid
         """
+
+        print(f"source_hash: {source_hash}, destination_account: {destination_account}")
+        print(
+            f"previous: {previous}, representative: {representative}, balance: {balance}"
+        )
         if source_hash and destination_account:
             raise ValueError(
                 "Specify either `source_hash` or `destination_account`. Never both"
@@ -160,7 +166,6 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         response = await self.rpc.work_generate(
             pow_hash, use_peers=self.config.use_work_peers
         )
-        try_raise_error(response)
         return response["work"]
 
     async def _wait_for_confirmation(self, block_hash: str, timeout: int = 300) -> bool:
@@ -218,15 +223,13 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :return: Hash of the processed block
         :raises ValueError: If block processing fails
         """
-        try:
-            response = await self.rpc.process(block.json())
-            try_raise_error(response)
-            block_hash = response["hash"]
-            logger.debug("Successfully processed %s, hash: %s", operation, block_hash)
-            return block_hash
-        except Exception as e:
-            logger.error("Failed to process %s: %s", operation, str(e))
-            raise
+
+        response = await self.rpc.process(block.json())
+        print(f"our response: {response}")
+
+        block_hash = response["hash"]
+        logger.debug("Successfully processed %s, hash: %s", operation, block_hash)
+        return block_hash
 
     async def _get_block_params(self) -> Dict[str, Any]:
         """
@@ -255,8 +258,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             "representative": account_info["representative"],
         }
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def send(self, destination_account: str, amount: Decimal | str | int) -> str:
         """
         Sends Nano to a destination account.
@@ -279,8 +282,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         response = await self.send_raw(destination_account, amount_raw)
         return response.unwrap()
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def send_raw(self, destination_account: str, amount_raw: int | str) -> str:
         """
         Sends Nano to a destination account.
@@ -320,8 +323,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             block, f"send of {amount_raw} raw to {destination_account}"
         )
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def sweep(
         self,
         destination_account: str,
@@ -348,8 +351,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         )
         return response.unwrap()
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def receive_by_hash(
         self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
     ) -> dict:
@@ -420,8 +423,8 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             )
             raise
 
-    @handle_errors
     @reload_after
+    @handle_errors
     async def receive_all(
         self,
         threshold_raw: float = DEFAULT_THRESHOLD_RAW,

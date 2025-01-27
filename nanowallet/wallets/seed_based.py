@@ -1,6 +1,6 @@
 from typing import Optional
 from nano_lib_py import generate_account_private_key
-from nanorpc.client import NanoRpcTyped
+from ..rpc.wallet_rpc import NanoWalletRpc
 from ..models import WalletConfig
 from ..errors import InvalidSeedError, InvalidIndexError
 from .key_based import NanoWalletKey
@@ -15,7 +15,7 @@ class NanoWallet(NanoWalletKey):
 
     def __init__(
         self,
-        rpc: NanoRpcTyped,
+        rpc: NanoWalletRpc,
         seed: str,
         index: int,
         config: Optional[WalletConfig] = None,

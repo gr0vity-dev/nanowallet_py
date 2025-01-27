@@ -1,7 +1,7 @@
 # nanowallet/wallets/base.py
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
-from nanorpc.client import NanoRpcTyped
+from ..rpc.wallet_rpc import NanoWalletRpc, NanoRpcProtocol
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..errors import (
     try_raise_error,
@@ -17,7 +17,7 @@ class NanoWalletBase:
 
     def __init__(
         self,
-        rpc: NanoRpcTyped,
+        rpc: NanoWalletRpc,
         config: Optional[WalletConfig] = None,
     ):
         self.rpc = rpc
@@ -33,23 +33,22 @@ class NanoWalletBase:
 
     async def _fetch_account_info(self) -> Dict[str, Any]:
         """Get account information from RPC"""
-        response = await self.rpc.account_info(
+        return await self.rpc.account_info(
             self.account,
-            weight=True,
-            receivable=True,
-            representative=True,
+            include_weight=True,
+            include_receivable=True,
+            include_representative=True,
             include_confirmed=False,
         )
-        return response
 
     async def _block_info(self, block_hash: str) -> Dict[str, Any]:
         """Get block information"""
         response = await self.rpc.blocks_info(
-            [block_hash], source=True, receive_hash=True, json_block=True
+            [block_hash],
+            include_source=True,
+            include_receive_hash=True,
+            json_block=True,
         )
-        if block_not_found(response):
-            raise BlockNotFoundError(f"Block not found {block_hash}")
-        try_raise_error(response)
         return response["blocks"][block_hash]
 
 
