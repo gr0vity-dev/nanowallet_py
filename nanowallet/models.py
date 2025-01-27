@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
-from .utils.conversion import raw_to_nano
+from .utils.conversion import _raw_to_nano
 
 
 @dataclass
@@ -24,12 +24,12 @@ class WalletBalance:
     @property
     def balance(self) -> Decimal:
         """Current balance in Nano"""
-        return raw_to_nano(self.balance_raw)
+        return _raw_to_nano(self.balance_raw)
 
     @property
     def receivable(self) -> Decimal:
         """Receivable balance in Nano"""
-        return raw_to_nano(self.receivable_raw)
+        return _raw_to_nano(self.receivable_raw)
 
 
 @dataclass
@@ -47,4 +47,4 @@ class AccountInfo:
     @property
     def weight(self) -> Decimal:
         """Account weight in Nano"""
-        return raw_to_nano(self.weight_raw)
+        return _raw_to_nano(self.weight_raw)

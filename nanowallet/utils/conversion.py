@@ -1,12 +1,13 @@
 from decimal import Decimal
-from typing import Union
+from typing import Union, List, Dict
 from nanowallet.errors import InvalidAmountError
+from .validation import validate_nano_amount
 
 
 RAW_PER_NANO = Decimal("10") ** 30
 
 
-def raw_to_nano(raw_amount: Union[int, str, Decimal], decimal_places=30) -> Decimal:
+def _raw_to_nano(raw_amount: Union[int, str, Decimal], decimal_places=30) -> Decimal:
     """
     Convert raw amount to nano with configurable decimal places precision.
     1 nano = 10^30 raw
@@ -35,7 +36,7 @@ def raw_to_nano(raw_amount: Union[int, str, Decimal], decimal_places=30) -> Deci
     )
 
 
-def nano_to_raw(nano_amount: Union[str, Decimal, int]) -> int:
+def _nano_to_raw(nano_amount: Union[str, Decimal, int]) -> int:
     """
     Convert nano amount to raw
     1 nano = 10^30 raw
@@ -45,3 +46,50 @@ def nano_to_raw(nano_amount: Union[str, Decimal, int]) -> int:
         raise InvalidAmountError("Negative values are not allowed")
     raw_amount = nano_decimal * RAW_PER_NANO
     return int(raw_amount)
+
+
+def raw_to_nano(amount_raw: int, decimal_places=6) -> Decimal:
+    """
+    Converts raw amount to Nano, truncating to 6 decimal places.
+
+    Args:
+        raw_amount: Amount in raw units
+
+    Returns:
+        Decimal: Amount in NANO, truncated to 6 decimal places
+    """
+    return _raw_to_nano(amount_raw, decimal_places=decimal_places)
+
+
+def nano_to_raw(amount_nano: Decimal | str | int, decimal_places=30) -> int:
+    """
+    Converts Nano amount to raw amount.
+
+    Args:
+        amount_nano: The amount in Nano (as Decimal, string, or int)
+
+    Returns:
+        int: The amount in raw
+
+    Raises:
+        TypeError: If amount is float or invalid type
+        ValueError: If amount is negative or invalid format
+    """
+    amount_decimal = validate_nano_amount(amount_nano)
+    return _nano_to_raw(
+        _raw_to_nano(_nano_to_raw(amount_decimal), decimal_places=decimal_places)
+    )
+
+
+def sum_received_amount(receive_all_response: List[Dict]) -> Dict:
+    """
+    Sums the amount_raw values from a list of receivable responses.
+
+    Args:
+        receive_all_response: A list of dictionaries containing 'amount_raw'
+
+    Returns:
+        dict: A dictionary with the total amount in raw and Nano
+    """
+    total_amount_raw = sum(int(item["amount_raw"]) for item in receive_all_response)
+    return {"amount_raw": total_amount_raw, "amount": _raw_to_nano(total_amount_raw)}

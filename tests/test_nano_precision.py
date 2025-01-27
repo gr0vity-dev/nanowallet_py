@@ -1,6 +1,9 @@
 import unittest
 from decimal import Decimal
-from nanowallet.utils import raw_to_nano, nano_to_raw
+from nanowallet.utils.conversion import (
+    _raw_to_nano as raw_to_nano,
+    _nano_to_raw as nano_to_raw,
+)
 from nanowallet.errors import InvalidAmountError
 
 

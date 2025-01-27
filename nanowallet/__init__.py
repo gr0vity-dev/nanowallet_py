@@ -5,6 +5,7 @@ from .wallets import (
     NanoWallet,
 )
 from .models import WalletConfig, WalletBalance, AccountInfo
+from .utils import NanoResult
 from .errors import (
     RpcError,
     InvalidSeedError,
@@ -14,7 +15,7 @@ from .errors import (
     InsufficientBalanceError,
     TimeoutException,
 )
-from .utils.conversion import raw_to_nano, nano_to_raw
+from .utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
 from .utils.validation import validate_nano_amount, validate_account
 from .wallets.rpc import NanoWalletRpc
 
@@ -23,12 +24,12 @@ __all__ = [
     "NanoWalletReadOnly",
     "NanoWalletKey",
     "NanoWallet",
-    # RPC
     "NanoWalletRpc",
     # Models
     "WalletConfig",
     "WalletBalance",
     "AccountInfo",
+    "NanoResult",
     # Errors
     "RpcError",
     "InvalidSeedError",
@@ -40,6 +41,7 @@ __all__ = [
     # Utils
     "raw_to_nano",
     "nano_to_raw",
+    "sum_received_amount",
     "validate_nano_amount",
     "validate_account",
 ]

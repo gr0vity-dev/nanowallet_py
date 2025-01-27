@@ -15,12 +15,11 @@ from nano_lib_py import (
 
 
 from ..models import WalletConfig
-from ..utils.conversion import raw_to_nano, nano_to_raw
+from ..utils.conversion import _raw_to_nano, _nano_to_raw
 from ..utils.validation import validate_account_id, validate_nano_amount
 from ..utils.decorators import handle_errors, reload_after
 
 from ..errors import (
-    try_raise_error,
     account_not_found,
     BlockNotFoundError,
     InsufficientBalanceError,
@@ -278,7 +277,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             InsufficientBalanceError: If insufficient balance
         """
         amount_decimal = validate_nano_amount(amount)
-        amount_raw = nano_to_raw(amount_decimal)
+        amount_raw = _nano_to_raw(amount_decimal)
         response = await self.send_raw(destination_account, amount_raw)
         return response.unwrap()
 
@@ -410,7 +409,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             result = {
                 "hash": received_hash,
                 "amount_raw": amount_raw,
-                "amount": raw_to_nano(amount_raw),
+                "amount": _raw_to_nano(amount_raw),
                 "source": send_block_info["block_account"],
                 "confirmed": wait_confirmation and confirmed,
             }

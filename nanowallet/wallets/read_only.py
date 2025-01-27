@@ -2,7 +2,7 @@
 from typing import Optional, List, Dict, Any, Protocol
 from .rpc import NanoRpcProtocol
 from ..models import WalletConfig, WalletBalance, AccountInfo
-from ..utils.conversion import raw_to_nano
+from ..utils.conversion import _raw_to_nano
 from ..utils.decorators import handle_errors, reload_after
 from ..errors import (
     try_raise_error,
@@ -99,9 +99,9 @@ class NanoWalletReadOnly(NanoWalletBase):
             history = response.get("history", [])
             for block in history:
                 block["amount_raw"] = int(block["amount"])
-                block["amount"] = raw_to_nano(block["amount_raw"])
+                block["amount"] = _raw_to_nano(block["amount_raw"])
                 block["balance_raw"] = int(block["balance"])
-                block["balance"] = raw_to_nano(block["balance_raw"])
+                block["balance"] = _raw_to_nano(block["balance_raw"])
                 block["timestamp"] = int(block["local_timestamp"])
                 block["height"] = int(block["height"])
                 block["confirmed"] = block["confirmed"] == "true"

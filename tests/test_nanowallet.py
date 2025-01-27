@@ -3,18 +3,14 @@ from unittest.mock import AsyncMock, patch, Mock
 
 
 from nanowallet.wallets import NanoWallet, NanoWalletRpc
-from nanowallet.wallets.base import WalletUtils
 from nanorpc.client import NanoRpcTyped
 
 from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
-from nanowallet.utils.conversion import raw_to_nano, nano_to_raw
+from nanowallet.utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
 from nanowallet.models import AccountInfo, WalletBalance
 import logging
-
-nano_to_raw = WalletUtils.nano_to_raw
-raw_to_nano = WalletUtils.raw_to_nano
 
 
 @pytest.fixture
@@ -1025,7 +1021,7 @@ def test_sum_amount():
             "source": "source_account2",
         },
     ]
-    sum = WalletUtils.sum_received_amount(received_amount_response)
+    sum = sum_received_amount(received_amount_response)
     assert sum["amount_raw"] == 500000000000000000000000000 + 21
 
 
