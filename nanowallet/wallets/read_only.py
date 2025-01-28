@@ -208,7 +208,7 @@ class NanoWalletReadOnly(NanoWalletBase):
                     int(amount) for amount in self.receivable_blocks.values()
                 ),
             )
-            self._account_info = AccountInfo()  # Empty account info
+            self._account_info = AccountInfo(account=self.account)  # Empty account info
         elif no_error(account_info):
             # Update balance info
             self._balance_info = WalletBalance(
@@ -218,6 +218,7 @@ class NanoWalletReadOnly(NanoWalletBase):
 
             # Update account info
             self._account_info = AccountInfo(
+                account=self.account,
                 frontier_block=account_info["frontier"],
                 representative=account_info["representative"],
                 representative_block=account_info["representative_block"],

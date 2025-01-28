@@ -38,6 +38,7 @@ class WalletBalance:
 class AccountInfo:
     """Detailed account information"""
 
+    account: str
     frontier_block: Optional[str] = None
     representative: Optional[str] = None
     representative_block: Optional[str] = None

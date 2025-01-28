@@ -71,7 +71,9 @@ class NanoWalletRpc:
             username: Optional username for authentication
             password: Optional password for authentication
         """
-        self._rpc = NanoRpcTyped(url=url, username=username, password=password)
+        self._rpc = NanoRpcTyped(
+            url=url, username=username, password=password, wrap_json=True
+        )
         logger.debug("Initialized RPC client with URL: %s", url)
 
     async def account_info(
@@ -168,9 +170,8 @@ class NanoWalletRpc:
         Returns:
             Dict containing process result
         """
-        print(f"Processing block: {block}")
+        logger.debug("Processing block: %s", block)
         response = await self._rpc.process(block)
-        print(f"_rpc response: {response}")
         try_raise_error(response)
         return response
 

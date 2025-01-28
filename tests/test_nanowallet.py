@@ -220,6 +220,102 @@ async def test_reload_no_receivables(mock_rpc, mock_rpc_typed, seed, index):
 
 @pytest.mark.asyncio
 @patch("nanowallet.wallets.key_based.NanoWalletBlock")
+async def test_send_with_confirmation(
+    mock_block, mock_rpc_typed, mock_rpc, seed, index
+):
+
+    received_block_1 = "c" * 64
+
+    mock_rpc_typed.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000",
+    }
+    mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
+    mock_rpc_typed.process.side_effect = [
+        {"hash": received_block_1},  # First call succeeds
+    ]
+
+    def blocks_info_side_effect(hashes, **kwargs):
+        responses = {
+            received_block_1: {"confirmed": "false", "contents": {}},
+            received_block_1: {"confirmed": "false", "contents": {}},
+            received_block_1: {"confirmed": "true", "contents": {}},
+        }
+        return {"blocks": {hash: responses[hash] for hash in hashes}}
+
+    mock_rpc_typed.blocks_info.side_effect = blocks_info_side_effect
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.send(
+        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
+        1,
+        wait_confirmation=True,
+    )
+
+    assert result.success == True
+    assert result.value == received_block_1
+    mock_block.assert_called()
+    mock_rpc_typed.process.assert_called()
+
+
+@pytest.mark.asyncio
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+async def test_send_with_no_confirmation_timeout(
+    mock_block, mock_rpc_typed, mock_rpc, seed, index
+):
+
+    received_block_1 = "c" * 64
+
+    mock_rpc_typed.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000",
+    }
+    mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
+    mock_rpc_typed.process.side_effect = [
+        {"hash": received_block_1},  # First call succeeds
+    ]
+
+    def blocks_info_side_effect(hashes, **kwargs):
+        responses = {
+            received_block_1: {"confirmed": "false", "contents": {}},
+            received_block_1: {"confirmed": "false", "contents": {}},
+            received_block_1: {"confirmed": "false", "contents": {}},
+        }
+        return {"blocks": {hash: responses[hash] for hash in hashes}}
+
+    mock_rpc_typed.blocks_info.side_effect = blocks_info_side_effect
+
+    wallet = NanoWallet(mock_rpc, seed, index)
+    result = await wallet.send(
+        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
+        1,
+        wait_confirmation=True,
+        timeout=0.1,
+    )
+
+    assert result.success == False
+    assert result.value == None
+    mock_rpc_typed.process.assert_called()
+
+
+@pytest.mark.asyncio
+@patch("nanowallet.wallets.key_based.NanoWalletBlock")
 async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -235,15 +331,15 @@ async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
         "receivable": "1000000000000000000000000000000",
     }
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
-    mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
+    mock_rpc_typed.process.side_effect = [{"hash": "processed_block_hash"}]
 
     wallet = NanoWallet(mock_rpc, seed, index)
     result = await wallet.send(
-        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1
+        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
+        1,
     )
 
     assert result.success == True
-    print(result.value)
     assert result.value == "processed_block_hash"
     mock_block.assert_called()
     mock_rpc_typed.process.assert_called()

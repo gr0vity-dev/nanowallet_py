@@ -21,7 +21,7 @@ class NanoWalletBase:
         self.account = None
         self.receivable_blocks = {}
         self._balance_info = WalletBalance()
-        self._account_info = AccountInfo()
+        self._account_info = AccountInfo(account=self.account)
 
     async def _fetch_account_info(self) -> Dict[str, Any]:
         """Get account information from RPC"""
