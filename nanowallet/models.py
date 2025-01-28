@@ -1,7 +1,9 @@
+# nanowallet/models.py
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 from .utils.conversion import _raw_to_nano
+from .libs.account_helper import AccountHelper
 
 
 @dataclass
@@ -48,3 +50,78 @@ class AccountInfo:
     def weight(self) -> Decimal:
         """Account weight in Nano"""
         return _raw_to_nano(self.weight_raw)
+
+
+@dataclass(frozen=True)
+class Receivable:
+    """Represents a pending transaction waiting to be received"""
+
+    block_hash: str
+    amount_raw: int
+
+    @property
+    def amount(self) -> Decimal:
+        """Convert raw amount to Nano"""
+        return _raw_to_nano(self.amount_raw)
+
+
+@dataclass(frozen=True)
+class ReceivedBlock:
+    """Represents a received block with its details"""
+
+    block_hash: str
+    amount_raw: int
+    source: str
+    confirmed: bool
+
+    @property
+    def amount(self) -> Decimal:
+        """Convert raw amount to Nano"""
+        return _raw_to_nano(self.amount_raw)
+
+
+@dataclass(frozen=True)
+class Transaction:
+    """Represents a confirmed transaction in account history"""
+
+    block_hash: str
+    type: str  # "state", "send", "receive", etc.
+    subtype: Optional[str]  # "send", "receive", "epoch", "change", etc.
+    account: str  # Counterparty account
+    representative: str  # Representative account
+    previous: str  # Previous block hash
+    amount_raw: int
+    balance_raw: int
+    timestamp: int
+    height: int
+    confirmed: bool
+    link: str  # Transaction link/recipient
+    signature: str
+    work: str
+
+    @property
+    def amount(self) -> Decimal:
+        """Convert raw amount to Nano"""
+        return _raw_to_nano(self.amount_raw)
+
+    @property
+    def balance(self) -> Decimal:
+        """Convert raw balance to Nano"""
+        return _raw_to_nano(self.balance_raw)
+
+    @property
+    def link_as_account(self) -> str:
+        """The account receiving funds"""
+        return AccountHelper.get_account(public_key=self.link)
+
+    @property
+    def destination(self) -> str:
+        """The account receiving funds"""
+        if self.subtype == "send":
+            return self.link_as_account
+
+    @property
+    def pairing_block_hash(self) -> str:
+        """The block sending funds"""
+        if self.subtype == "receive":
+            return self.link

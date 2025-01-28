@@ -1,5 +1,5 @@
 # nanowallet/wallets/key_based.py
-from typing import Optional, Protocol, Dict, Any
+from typing import Optional, Protocol, Dict, Any, List
 from decimal import Decimal
 import asyncio
 import time
@@ -7,7 +7,7 @@ import logging
 
 from ..libs.account_helper import AccountHelper
 from ..libs.block import NanoWalletBlock
-from ..models import WalletConfig
+from ..models import WalletConfig, Receivable, Transaction, ReceivedBlock
 from ..utils.conversion import _raw_to_nano, _nano_to_raw
 from ..utils.validation import validate_nano_amount
 from ..utils.decorators import handle_errors, reload_after
@@ -54,7 +54,7 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
 
     async def receive_by_hash(
         self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
-    ) -> dict:
+    ) -> ReceivedBlock:
         """Receives a specific block by its hash"""
 
     async def receive_all(
@@ -62,7 +62,7 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
         threshold_raw: float = DEFAULT_THRESHOLD_RAW,
         wait_confirmation: bool = True,
         timeout: int = 30,
-    ) -> list:
+    ) -> List[ReceivedBlock]:
         """Receives all pending receivable blocks"""
 
     async def refund_first_sender(self) -> str:
@@ -327,8 +327,22 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
     @handle_errors
     async def receive_by_hash(
         self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
-    ) -> dict:
-        """Receives a specific block by its hash."""
+    ) -> ReceivedBlock:
+        """
+        Receives a specific block by its hash.
+
+        Args:
+            block_hash: Hash of the block to receive
+            wait_confirmation: If True, wait for block confirmation
+            timeout: Max seconds to wait for confirmation
+
+        Returns:
+            ReceivedBlock object with details about the received block
+
+        Raises:
+            BlockNotFoundError: If block not found
+            TimeoutException: If confirmation times out
+        """
         logger.debug(
             "Starting receive_by_hash for block %s, wait_confirmation=%s, timeout=%s",
             block_hash,
@@ -357,6 +371,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             )
             logger.debug("Block processed with hash %s", received_hash)
 
+            confirmed = False
             if wait_confirmation:
                 start_time = time.time()
                 logger.debug(
@@ -379,15 +394,12 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
                         f"Block {received_hash} not confirmed within {timeout} seconds"
                     )
 
-            result = {
-                "hash": received_hash,
-                "amount_raw": amount_raw,
-                "amount": _raw_to_nano(amount_raw),
-                "source": send_block_info["block_account"],
-                "confirmed": wait_confirmation and confirmed,
-            }
-            logger.debug("Returning result: %s", result)
-            return result
+            return ReceivedBlock(
+                block_hash=received_hash,
+                amount_raw=amount_raw,
+                source=send_block_info["block_account"],
+                confirmed=confirmed if wait_confirmation else False,
+            )
 
         except Exception as e:
             logger.debug(
@@ -402,7 +414,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         threshold_raw: float = DEFAULT_THRESHOLD_RAW,
         wait_confirmation: bool = True,
         timeout: int = 30,
-    ) -> list:
+    ) -> List[ReceivedBlock]:
         """
         Receives all pending receivable blocks.
 
@@ -412,17 +424,20 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             timeout: Max seconds to wait for each confirmation
 
         Returns:
-            List of dictionaries with information about each received block
+            List of ReceivedBlock objects with details about each received block
         """
         block_results = []
         response = await self.list_receivables(threshold_raw=threshold_raw)
         receivables = response.unwrap()
 
+        receivable: Receivable
         for receivable in receivables:
-            response = await self.receive_by_hash(
-                receivable[0], wait_confirmation=wait_confirmation, timeout=timeout
+            received_block = await self.receive_by_hash(
+                receivable.block_hash,
+                wait_confirmation=wait_confirmation,
+                timeout=timeout,
             )
-            block_results.append(response.unwrap())
+            block_results.append(received_block.unwrap())
 
         return block_results
 

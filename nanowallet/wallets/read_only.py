@@ -1,7 +1,7 @@
 # nanowallet/wallets/read_only.py
 from typing import Optional, List, Dict, Any, Protocol
 from ..libs.rpc import NanoRpcProtocol
-from ..models import WalletConfig, WalletBalance, AccountInfo
+from ..models import WalletConfig, WalletBalance, AccountInfo, Receivable, Transaction
 from ..utils.conversion import _raw_to_nano
 from ..utils.decorators import handle_errors, reload_after
 from ..errors import (
@@ -10,8 +10,9 @@ from ..errors import (
     no_error,
     InvalidAccountError,
 )
-from nano_lib_py import validate_account_id
+from ..libs.account_helper import AccountHelper
 from .base import NanoWalletBase
+from ..utils import NanoResult
 import logging
 
 # Configure logging
@@ -28,7 +29,7 @@ class NanoWalletReadOnlyProtocol(Protocol):
 
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Transaction]:
         """Get block history for the wallet's account"""
 
     async def has_balance(self) -> bool:
@@ -42,7 +43,7 @@ class NanoWalletReadOnlyProtocol(Protocol):
 
     async def list_receivables(
         self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
-    ) -> List[tuple]:
+    ) -> List[Receivable]:
         """List receivable blocks"""
 
     async def reload(self):
@@ -66,7 +67,7 @@ class NanoWalletReadOnly(NanoWalletBase):
         :param config: Optional wallet configuration
         """
         super().__init__(rpc, config)
-        if not validate_account_id(account):
+        if not AccountHelper.validate_account(account):
             raise InvalidAccountError("Invalid account address")
         self.account = account
 
@@ -74,7 +75,7 @@ class NanoWalletReadOnly(NanoWalletBase):
     @handle_errors
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Transaction]:
         """
         Get block history for the wallet's account.
 
@@ -97,16 +98,28 @@ class NanoWalletReadOnly(NanoWalletBase):
 
             # Extract and normalize the history list
             history = response.get("history", [])
+            transactions = []
             for block in history:
-                block["amount_raw"] = int(block["amount"])
-                block["amount"] = _raw_to_nano(block["amount_raw"])
-                block["balance_raw"] = int(block["balance"])
-                block["balance"] = _raw_to_nano(block["balance_raw"])
-                block["timestamp"] = int(block["local_timestamp"])
-                block["height"] = int(block["height"])
-                block["confirmed"] = block["confirmed"] == "true"
+                transactions.append(
+                    Transaction(
+                        block_hash=block["hash"],
+                        type=block["type"],
+                        subtype=block.get("subtype"),
+                        account=block["account"],
+                        previous=block["previous"],
+                        representative=block["representative"],
+                        amount_raw=int(block["amount"]),
+                        balance_raw=int(block["balance"]),
+                        timestamp=int(block["local_timestamp"]),
+                        height=int(block["height"]),
+                        confirmed=block["confirmed"] == "true",
+                        link=block["link"],
+                        signature=block["signature"],
+                        work=block["work"],
+                    )
+                )
 
-            return history
+            return transactions
 
         except Exception as e:
             logger.error("Error retrieving account history: %s", str(e))
@@ -149,12 +162,15 @@ class NanoWalletReadOnly(NanoWalletBase):
     @handle_errors
     async def list_receivables(
         self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
-    ) -> List[tuple]:
+    ) -> List[Receivable]:
         """
         Lists receivable blocks sorted by descending amount.
 
-        :param threshold_raw: Minimum amount to consider (in raw).
-        :return: A list of tuples containing block hashes and amounts.
+        Args:
+            threshold_raw: Minimum amount to consider (in raw).
+
+        Returns:
+            List of Receivable objects containing block hashes and amounts.
         """
         await self.reload()
 
@@ -162,21 +178,15 @@ class NanoWalletReadOnly(NanoWalletBase):
         if not self.receivable_blocks:
             return []
 
-        # Filter blocks based on threshold if provided
-        filtered_blocks = self.receivable_blocks.items()
-        if threshold_raw is not None:
-            filtered_blocks = [
-                (block, amount)
-                for block, amount in filtered_blocks
-                if int(amount) >= threshold_raw
-            ]
+        # Convert blocks to Receivable objects and filter by threshold
+        receivables = [
+            Receivable(block_hash=block, amount_raw=int(amount))
+            for block, amount in self.receivable_blocks.items()
+            if int(amount) >= threshold_raw
+        ]
 
-        # Sort the filtered blocks by descending amount
-        sorted_receivables = sorted(
-            filtered_blocks, key=lambda x: int(x[1]), reverse=True
-        )
-
-        return sorted_receivables
+        # Sort by descending amount
+        return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
 
     @handle_errors
     async def reload(self):

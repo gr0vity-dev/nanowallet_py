@@ -9,7 +9,7 @@ from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
 from nanowallet.utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
-from nanowallet.models import AccountInfo, WalletBalance
+from nanowallet.models import *
 import logging
 
 
@@ -324,9 +324,12 @@ async def test_list_receivables(mock_rpc, mock_rpc_typed, seed, index):
     result = await wallet.list_receivables()
 
     expected = [
-        ("block1", "2000000000000000000000000000000"),
-        ("block2", "1000000000000000000000000000000"),
+        Receivable(block_hash="block1", amount_raw=2000000000000000000000000000000),
+        Receivable(block_hash="block2", amount_raw=1000000000000000000000000000000),
     ]
+
+    assert result.value[0].amount == 2
+    assert result.value[1].amount == 1
     assert result.success == True
     assert result.value == expected
 
@@ -362,7 +365,7 @@ async def test_list_receivables_threshold(mock_rpc, mock_rpc_typed, seed, index)
     )
 
     expected = [
-        ("block1", "2000000000000000000000000000000"),
+        Receivable(block_hash="block1", amount_raw=2000000000000000000000000000000),
     ]
     assert result.success == True
     assert result.value == expected
@@ -396,13 +399,13 @@ async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index
     )
 
     assert result.success == True
-    assert result.value == {
-        "hash": "processed_block_hash",
-        "amount_raw": 5,
-        "confirmed": False,
-        "amount": Decimal("5E-30"),
-        "source": "source_account1",
-    }
+    assert result.value == ReceivedBlock(
+        block_hash="processed_block_hash",
+        amount_raw=5,
+        source="source_account1",
+        confirmed=False,
+    )
+
     mock_block.assert_called()
     mock_rpc_typed.process.assert_called()
 
@@ -444,13 +447,14 @@ async def test_receive_by_hash_wait_conf(
     result = await wallet.receive_by_hash("block_hash_to_receive")
 
     assert result.success == True
-    assert result.value == {
-        "hash": "processed_block_hash",
-        "amount_raw": 5,
-        "amount": Decimal("5E-30"),
-        "source": "source_account1",
-        "confirmed": True,
-    }
+
+    assert result.value == ReceivedBlock(
+        block_hash="processed_block_hash",
+        amount_raw=5,
+        source="source_account1",
+        confirmed=True,
+    )
+    assert result.value.amount == Decimal("5E-30")
 
     # Verify the expected calls
     mock_block.assert_called()
@@ -492,13 +496,14 @@ async def test_receive_by_hash_new_account(
     )
 
     assert result.success == True
-    assert result.value == {
-        "hash": "processed_block_hash",
-        "amount_raw": 5000,
-        "confirmed": False,
-        "amount": Decimal("5E-27"),
-        "source": "source_account1",
-    }
+    assert result.value == ReceivedBlock(
+        block_hash="processed_block_hash",
+        amount_raw=5000,
+        source="source_account1",
+        confirmed=False,
+    )
+
+    assert result.value.amount == Decimal("5E-27")
     mock_block.assert_called()
     mock_rpc_typed.process.assert_called()
 
@@ -546,13 +551,13 @@ async def test_receive_by_hash_new_account_with_conf(
     result = await wallet.receive_by_hash("block_hash_to_receive")
 
     assert result.success == True
-    assert result.value == {
-        "hash": "processed_block_hash",
-        "amount_raw": 5000,
-        "confirmed": True,
-        "amount": Decimal("5E-27"),
-        "source": "source_account1",
-    }
+    assert result.value == ReceivedBlock(
+        block_hash="processed_block_hash",
+        amount_raw=5000,
+        source="source_account1",
+        confirmed=True,
+    )
+    assert result.value.amount == Decimal("5E-27")
 
     # Verify the expected calls
     mock_block.assert_called()
@@ -759,21 +764,22 @@ async def test_receive_all(mock_rpc, mock_rpc_typed, seed, index):
     assert result.success == True
 
     assert result.value == [
-        {
-            "hash": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79",
-            "amount_raw": 500000000000000000000000000,
-            "amount": Decimal("0.0005"),
-            "source": "source_account1",
-            "confirmed": False,
-        },
-        {
-            "hash": "0000000000000000000000000000000000000000000000000000000000007777",
-            "amount_raw": 2,
-            "amount": Decimal("2E-30"),
-            "source": "source_account2",
-            "confirmed": False,
-        },
+        ReceivedBlock(
+            block_hash="4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79",
+            amount_raw=500000000000000000000000000,
+            source="source_account1",
+            confirmed=False,
+        ),
+        ReceivedBlock(
+            block_hash="0000000000000000000000000000000000000000000000000000000000007777",
+            amount_raw=2,
+            source="source_account2",
+            confirmed=False,
+        ),
     ]
+
+    assert result.value[0].amount == Decimal("0.0005")
+    assert result.value[1].amount == Decimal("2E-30")
     assert mock_rpc_typed.receivable.call_count == 4
     assert mock_rpc_typed.blocks_info.call_count == 2
     assert mock_rpc_typed.account_info.call_count == 6
@@ -845,8 +851,8 @@ async def test_receive_all_threshold_filtering(mock_rpc, mock_rpc_typed, seed, i
 
     # Verify amounts are above threshold and blocks are confirmed
     for block in received_blocks:
-        assert block["amount_raw"] >= threshold
-        assert block["confirmed"] == True
+        assert block.amount_raw >= threshold
+        assert block.confirmed == True
 
     # Verify the expected RPC calls
     assert mock_rpc_typed.receivable.call_count >= 1
@@ -1421,44 +1427,51 @@ async def test_account_history(mock_rpc, mock_rpc_typed):
     blocks = result.unwrap()
 
     expected_blocks = [
-        {
-            "account": "nano_1htaxaiwg5h46afhxctm9khz74zjk75zrsth16upt3b17wndty5rwoowr3hu",
-            "amount": Decimal("0.000003"),
-            "balance": Decimal("685.480328931131963959607814791168"),
-            "confirmed": True,
-            "hash": "D80E18554DB0DE3CCE463943BCA91F09A72AA304F18E6E60F2AA09D6426B3BD7",
-            "height": 287,
-            "link": "3F48EA21C70DE2221AFEAB533C9FF28BF19147FC674F01376D05202F28BD7878",
-            "local_timestamp": "1735991174",
-            "previous": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
-            "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
-            "signature": "93048CA02BEA5F825AEFECBEEFCCE5364871806F74A5EB1AF59D4CA46FDF6FD8A8EE27474FB31E9A5EF9AB9ECD4BCAED2075CCF6057852AED227BA6E0720E902",
-            "subtype": "send",
-            "type": "state",
-            "work": "9cf61f7561c1ab3c",
-            "amount_raw": 3000000000000000000000000,
-            "balance_raw": 685480328931131963959607814791168,
-            "timestamp": 1735991174,
-        },
-        {
-            "account": "nano_3duhkw8zo3gzgq9dgubbwsnbd5k769c5zyi4dheck8yg4ukm83gf7a7nhts5",
-            "amount": Decimal("0.035714"),
-            "balance": Decimal("685.480331931131963959607814791168"),
-            "confirmed": True,
-            "hash": "C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
-            "height": 286,
-            "link": "AF6F970DFA85DF75CEB76D29E668958E4521D43FFA025BD8A91BCE16E53305CD",
-            "local_timestamp": "1735434546",
-            "previous": "BB48158268E2423F98B5363FB10685C593415286ED39E5F4452E29DBE0BBFD6C",
-            "representative": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
-            "signature": "F85918BCA24EB4E221CA49109E0DB6EEBA4BBA177B73374815AF039A42ED002433AA4FF2941A3E51CE9C339EF186937C4896756D84964003D08B4542A2034F04",
-            "subtype": "send",
-            "type": "state",
-            "work": "fc21cadd1abbbe4f",
-            "amount_raw": 35714000000000000000000000000,
-            "balance_raw": 685480331931131963959607814791168,
-            "timestamp": 1735434546,
-        },
+        Transaction(
+            account="nano_1htaxaiwg5h46afhxctm9khz74zjk75zrsth16upt3b17wndty5rwoowr3hu",
+            confirmed=True,
+            block_hash="D80E18554DB0DE3CCE463943BCA91F09A72AA304F18E6E60F2AA09D6426B3BD7",
+            height=287,
+            link="3F48EA21C70DE2221AFEAB533C9FF28BF19147FC674F01376D05202F28BD7878",
+            previous="C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+            representative="nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+            signature="93048CA02BEA5F825AEFECBEEFCCE5364871806F74A5EB1AF59D4CA46FDF6FD8A8EE27474FB31E9A5EF9AB9ECD4BCAED2075CCF6057852AED227BA6E0720E902",
+            subtype="send",
+            type="state",
+            work="9cf61f7561c1ab3c",
+            amount_raw=3000000000000000000000000,
+            balance_raw=685480328931131963959607814791168,
+            timestamp=1735991174,
+        ),
+        Transaction(
+            account="nano_3duhkw8zo3gzgq9dgubbwsnbd5k769c5zyi4dheck8yg4ukm83gf7a7nhts5",
+            confirmed=True,
+            block_hash="C4C9BD7EC4A1B7DE65FFE50D0B29891EC5245621024C86D76947275A8FFED1FE",
+            height=286,
+            link="AF6F970DFA85DF75CEB76D29E668958E4521D43FFA025BD8A91BCE16E53305CD",
+            previous="BB48158268E2423F98B5363FB10685C593415286ED39E5F4452E29DBE0BBFD6C",
+            representative="nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+            signature="F85918BCA24EB4E221CA49109E0DB6EEBA4BBA177B73374815AF039A42ED002433AA4FF2941A3E51CE9C339EF186937C4896756D84964003D08B4542A2034F04",
+            subtype="send",
+            type="state",
+            work="fc21cadd1abbbe4f",
+            amount_raw=35714000000000000000000000000,
+            balance_raw=685480331931131963959607814791168,
+            timestamp=1735434546,
+        ),
     ]
+
+    assert blocks[0].amount == Decimal("0.000003")
+    assert blocks[1].amount == Decimal("0.035714")
+    assert blocks[0].balance == Decimal("685.480328931131963959607814791168")
+    assert blocks[1].balance == Decimal("685.480331931131963959607814791168")
+    assert (
+        blocks[0].destination
+        == "nano_1htaxaiwg5h46afhxctm9khz74zjk75zrsth16upt3b17wndty5rwoowr3hu"
+    )
+    assert (
+        blocks[1].destination
+        == "nano_3duhkw8zo3gzgq9dgubbwsnbd5k769c5zyi4dheck8yg4ukm83gf7a7nhts5"
+    )
 
     assert blocks == expected_blocks
