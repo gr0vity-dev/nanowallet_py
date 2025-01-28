@@ -219,10 +219,61 @@ Note: All raw to Nano conversions use the `_raw_to_nano()` utility function for 
 - X: Feature available
 - -: Feature not available
 
+Method signatures:
+```python
+    async def account_history(
+        self, count: Optional[int] = -1, head: Optional[str] = None
+    ) -> List[Transaction]:
+        """Get block history for the wallet's account"""
 
+    async def has_balance(self) -> bool:
+        """Check if account has available balance"""
 
+    async def balance_info(self) -> WalletBalance:
+        """Get detailed balance information"""
 
+    async def account_info(self) -> AccountInfo:
+        """Get detailed account information"""
 
+    async def list_receivables(
+        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
+    ) -> List[Receivable]:
+        """List receivable blocks"""
+
+    async def reload(self):
+        """Reload account information"""
+
+    async def send(self, destination_account: str, amount: Decimal | str | int) -> str:
+        """Sends Nano to a destination account"""
+
+    async def send_raw(self, destination_account: str, amount: int) -> str:
+        """Sends Nano to a destination account"""
+
+    async def sweep(
+        self,
+        destination_account: str,
+        sweep_pending: bool = True,
+        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+    ) -> str:
+        """Transfers all funds from the current account to the destination account"""
+
+    async def receive_by_hash(
+        self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
+    ) -> ReceivedBlock:
+        """Receives a specific block by its hash"""
+
+    async def receive_all(
+        self,
+        threshold_raw: float = DEFAULT_THRESHOLD_RAW,
+        wait_confirmation: bool = True,
+        timeout: int = 30,
+    ) -> List[ReceivedBlock]:
+        """Receives all pending receivable blocks"""
+
+    async def refund_first_sender(self) -> str:
+        """Sends remaining funds to the account opener"""    
+
+```
 
 
 
@@ -342,6 +393,45 @@ try:
 except NanoException as e:
     print(f"Error: {e.message} ({e.code})")
 ```
+
+
+```python
+from nanowallet import NanoWallet, WalletConfig, NanoWalletRpc, sum_received_amount
+
+rpc = NanoWalletRpc(url="http://localhost:7076")
+wallet = NanoWallet(
+    rpc=rpc,
+    seed="0000000000000000000000000000000000000000000000000000000000000000",
+    index=0,  # First wallet from seed
+    config=WalletConfig(
+        use_work_peers=True,
+        default_representative="nano_3abc..."
+    )
+)
+
+# Receive all pending transactions
+result = await wallet.receive_all()
+if result.success:
+    received_blocks = result.value
+
+    received_sum = sum_received_amount(received_blocks)
+    print(received_sum.amount)
+    
+    for block in received_blocks:
+        print(f"Received {block.amount} NANO from {block.source}")
+        print(f"Block hash: {block.block_hash}")
+        print(f"Confirmed: {block.confirmed}")
+else:
+    print(f"Error receiving blocks: {result.error}")
+
+# Alternative using unwrap
+try:
+    received_blocks = (await wallet.receive_all()).unwrap()
+    total_received = sum(block.amount for block in received_blocks)
+    print(f"Successfully received {total_received} NANO across {len(received_blocks)} blocks")
+except NanoException as e:
+    print(f"Failed to receive blocks: {e.message} ({e.code})")
+
 
 ## Best Practices
 

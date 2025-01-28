@@ -342,6 +342,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         destination_account: str,
         sweep_pending: bool = True,
         threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+        wait_confirmation: bool = True,
     ) -> str:
         """
         Transfers all funds from the current account to the destination account.
@@ -349,6 +350,7 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         :param destination_account: The account to receive the funds.
         :param sweep_pending: Whether to receive pending blocks before sending.
         :param threshold_raw: Minimum amount to consider for receiving pending blocks (in raw).
+        :param wait_confirmation: If True, wait for confirmation
         :return: The hash of the sent block.
         :raises ValueError: If the destination account is invalid or insufficient balance.
         """
@@ -359,7 +361,9 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             await self.receive_all(threshold_raw=threshold_raw)
 
         response = await self.send_raw(
-            destination_account, self._balance_info.balance_raw
+            destination_account,
+            self._balance_info.balance_raw,
+            wait_confirmation=wait_confirmation,
         )
         return response.unwrap()
 
