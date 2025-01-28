@@ -41,9 +41,6 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
     async def send_raw(self, destination_account: str, amount: int) -> str:
         """Sends Nano to a destination account"""
 
-    async def receive(self, source_hash: str) -> str:
-        """Receives Nano from a source account"""
-
     async def sweep(
         self,
         destination_account: str,

@@ -3,7 +3,6 @@ from typing import Union, List, Dict
 from nanowallet.errors import InvalidAmountError
 from .validation import validate_nano_amount
 
-
 RAW_PER_NANO = Decimal("10") ** 30
 
 
@@ -79,17 +78,3 @@ def nano_to_raw(amount_nano: Decimal | str | int, decimal_places=30) -> int:
     return _nano_to_raw(
         _raw_to_nano(_nano_to_raw(amount_decimal), decimal_places=decimal_places)
     )
-
-
-def sum_received_amount(receive_all_response: List[Dict]) -> Dict:
-    """
-    Sums the amount_raw values from a list of receivable responses.
-
-    Args:
-        receive_all_response: A list of dictionaries containing 'amount_raw'
-
-    Returns:
-        dict: A dictionary with the total amount in raw and Nano
-    """
-    total_amount_raw = sum(int(item["amount_raw"]) for item in receive_all_response)
-    return {"amount_raw": total_amount_raw, "amount": _raw_to_nano(total_amount_raw)}

@@ -81,6 +81,16 @@ class ReceivedBlock:
 
 
 @dataclass(frozen=True)
+class AmountReceived:
+    amount_raw: int
+
+    @property
+    def amount(self) -> Decimal:
+        """Convert raw amount to Nano"""
+        return _raw_to_nano(self.amount_raw)
+
+
+@dataclass(frozen=True)
 class Transaction:
     """Represents a confirmed transaction in account history"""
 

@@ -15,7 +15,8 @@ from .errors import (
     InsufficientBalanceError,
     TimeoutException,
 )
-from .utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
+from .utils.conversion import raw_to_nano, nano_to_raw
+from .utils.amount_operations import sum_received_amount
 from .utils.validation import validate_nano_amount, validate_account
 from .libs.rpc import NanoWalletRpc
 
@@ -41,7 +42,7 @@ __all__ = [
     # Utils
     "raw_to_nano",
     "nano_to_raw",
-    "sum_received_amount",
     "validate_nano_amount",
     "validate_account",
+    "sum_received_amount",
 ]

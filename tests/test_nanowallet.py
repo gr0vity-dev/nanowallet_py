@@ -8,7 +8,8 @@ from nanorpc.client import NanoRpcTyped
 from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
 from decimal import Decimal
-from nanowallet.utils.conversion import raw_to_nano, nano_to_raw, sum_received_amount
+from nanowallet.utils.conversion import raw_to_nano, nano_to_raw
+from nanowallet.utils.amount_operations import sum_received_amount
 from nanowallet.models import *
 import logging
 
@@ -1014,21 +1015,22 @@ async def test_receive_all_empty_receivable(mock_rpc, mock_rpc_typed, seed, inde
 
 def test_sum_amount():
     received_amount_response = [
-        {
-            "hash": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79",
-            "amount_raw": 500000000000000000000000000,
-            "amount": Decimal("0.0005"),
-            "source": "source_account1",
-        },
-        {
-            "hash": "0000000000000000000000000000000000000000000000000000000000007777",
-            "amount_raw": 21,
-            "amount": 2e-30,
-            "source": "source_account2",
-        },
+        ReceivedBlock(
+            block_hash="4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b79",
+            amount_raw=500000000000000000000000000,
+            source="source_account1",
+            confirmed=True,
+        ),
+        ReceivedBlock(
+            block_hash="0000000000000000000000000000000000000000000000000000000000007777",
+            amount_raw=21,
+            source="source_account2",
+            confirmed=False,
+        ),
     ]
     sum = sum_received_amount(received_amount_response)
-    assert sum["amount_raw"] == 500000000000000000000000000 + 21
+    assert sum.amount_raw == 500000000000000000000000000 + 21
+    assert sum.amount == Decimal("0.0005") + Decimal("21e-30")
 
 
 @pytest.mark.asyncio

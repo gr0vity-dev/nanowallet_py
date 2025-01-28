@@ -1,75 +1,166 @@
-# NanoWallet Library
+# Nano Wallet Library
 
-
-**nanowallet_py** is a Python library that provides an easy-to-use interface for interacting with Nano nodes. This library allows you to manage your Nano account inside a wallet. It allows you to send and receive transactions, and interact with the Nano network using the `NanoRpcTyped` client.
-
-## Installation
-
-You can install NanoWallet using pip:
-
-```
-pip install nanowallet
-```
-
-## Usage
-
-Here's a basic example of how to use the NanoWallet library:
-
-```python
-import asyncio
-from nanorpc.client import NanoRpcTyped
-from nanowallet import NanoWallet
-
-async def main():
-    # Replace with your RPC endpoint
-    rpc = NanoRpcTyped(url='http://localhost:7076')
-    seed = '4f2dd...'  # Replace with your seed
-    index = 0
-
-    wallet = NanoWallet(rpc, seed, index)
-    await wallet.reload()  # Optional - loads all account data
-    print(wallet.account)
-    print(wallet.receivable_blocks)
-
-    response = await wallet.receive_all()
-    if response.success:
-        print(response.value)  # list of received block hashes
-
-asyncio.run(main())
-```
+A Python implementation of a Nano cryptocurrency wallet supporting read-only monitoring, key-based operations, and seed-based HD wallets. This library provides full transaction capabilities including sending, receiving, and sweeping funds.
 
 ## Features
 
-- Create and manage Nano wallets
-- Send and receive Nano transactions
-- Check account balance and pending blocks
-- Use work peers for PoW (Proof of Work) generation.
-- Handle errors with a robust error handling system
-- Seamlessly reload wallet state.
+- Multiple wallet types for different use cases:
+  - Read-only wallet for monitoring accounts
+  - Key-based wallet for full transaction capabilities
+  - Seed-based HD wallet for deterministic wallet generation
+- Comprehensive transaction support (send, receive, sweep)
+- Safe error handling with NanoResult wrapper
+- Automatic wallet state reloading
+- Support for work peers for PoW generation
+- Configurable default representatives
+
+## Installation
+
+```bash
+pip install nanowallet
+```
+
+## Wallet Types
+
+### 1. Read-Only Wallet
+```python
+from nanowallet import NanoWalletReadOnly, NanoWalletRpc
+
+rpc = NanoWalletRpc(url="http://localhost:7076")
+readonly_wallet = NanoWalletReadOnly(
+    rpc=rpc,
+    account="nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
+)
+
+# Usage example
+balance = await readonly_wallet.balance_info()
+if balance.success:
+    print(f"Balance: {balance.value.balance} NANO")
+```
+
+### 2. Key-Based Wallet
+```python
+from nanowallet import NanoWalletKey, NanoWalletRpc
+
+rpc = NanoWalletRpc(url="http://localhost:7076")
+key_wallet = NanoWalletKey(
+    rpc=rpc,
+    private_key="1234567890ABCDEF..." # 64 character hex string
+)
+
+# Send transaction example
+result = await key_wallet.send(
+    destination_account="nano_1abc...",
+    amount=Decimal("1.5")
+)
+```
+
+### 3. Seed-Based Wallet (HD Wallet)
+```python
+from nanowallet import NanoWallet, WalletConfig, NanoWalletRpc, sum_received_amount
+
+rpc = NanoWalletRpc(url="http://localhost:7076")
+wallet = NanoWallet(
+    rpc=rpc,
+    seed="0000000000000000000000000000000000000000000000000000000000000000",
+    index=0,  # First wallet from seed
+    config=WalletConfig(
+        use_work_peers=True,
+        default_representative="nano_3abc..."
+    )
+)
+
+# Receive all pending transactions
+result = await wallet.receive_all()
+if result.success:
+    received_blocks = result.value
+
+    received_sum = sum_received_amount(received_blocks)
+    print(received_sum.amount)
+    
+    for block in received_blocks:
+        print(f"Received {block.amount} NANO from {block.source}")
+        print(f"Block hash: {block.block_hash}")
+        print(f"Confirmed: {block.confirmed}")
+else:
+    print(f"Error receiving blocks: {result.error}")
+
+# Alternative using unwrap
+try:
+    received_blocks = (await wallet.receive_all()).unwrap()
+    total_received = sum(block.amount for block in received_blocks)
+    print(f"Successfully received {total_received} NANO across {len(received_blocks)} blocks")
+except NanoException as e:
+    print(f"Failed to receive blocks: {e.message} ({e.code})")
+```
+
+## Error Handling
+
+All methods return a `NanoResult[T]` wrapper for safe error handling:
+
+```python
+# Safe pattern with success check
+result = await wallet.send(destination="nano_1abc...", amount="1.5")
+if result.success:
+    print(f"Success: {result.value}")
+else:
+    print(f"Error: {result.error} ({result.error_code})")
+
+# Alternative pattern using unwrap()
+try:
+    block_hash = (await wallet.send(
+        destination_account="nano_1abc...",
+        amount="2.5"
+    )).unwrap()
+    print(f"Sent! Block hash: {block_hash}")
+except NanoException as e:
+    print(f"Error: {e.message} ({e.code})")
+```
 
 ## Available Methods
 
-- `reload()`:  
-  Loads the current state of the wallet, including balance, receivable blocks, account info, and more.
+### Read Operations
+- `account_history()`: List of historical transactions
+- `has_balance()`: Check if account has available balance
+- `balance_info()`: Current and pending balance information
+- `account_info()`: Detailed account metadata
+- `list_receivables()`: List of pending incoming transactions
 
-- `send(destination_account: str, amount: float)`:  
-  Sends a specified amount of Nano to the destination account. Returns the hash of the sent block.
+### Transaction Operations
+- `send()`: Send NANO to a destination account
+- `send_raw()`: Send raw amount of NANO
+- `sweep()`: Send all available funds to destination
+- `receive_by_hash()`: Receive specific pending block
+- `receive_all()`: Receive all pending transactions
+- `refund_first_sender()`: Return funds to original sender
 
-- `receive_by_hash(block_hash: str)`:  
-  Receives a specific receivable block by its hash. Returns the hash of the received block.
+## Best Practices
 
-- `sweep(destination_account: str)`:  
-  Sends all available funds from the current wallet to the specified destination account.
+1. **Secure Configuration**
+```python
+config = WalletConfig(
+    use_work_peers=True,  # For faster PoW
+    default_representative="nano_3..."  # Trusted representative
+)
+```
 
-- `receive_all(threshold: float = None)`:  
-  Receives all pending receivable blocks. Optionally, a threshold can be set to only receive blocks with amounts greater than the threshold.
+2. **Seed Security**
+```python
+# Use environment variables for sensitive data
+import os
+seed = os.environ.get("NANO_WALLET_SEED")
+if not seed:
+    raise ValueError("Missing NANO_WALLET_SEED environment variable")
+```
 
-- `list_receivables(threshold: float = None)`:  
-  Lists all receivable blocks, sorted by the amount in descending order. A threshold can be used to filter the results.
-
-- `refund_first_sender()`:  
-  Receives all receivable blocks and sends the entire funds back to the first sender (i.e., the account opener or eldest unreceived block).
-
+3. **RPC Security**
+```python
+rpc = NanoWalletRpc(
+    url="https://secure-node.example.com:7076",
+    username="user",
+    password="pass"
+)
+```
 
 ## Contributing
 
