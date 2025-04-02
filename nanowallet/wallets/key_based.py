@@ -744,10 +744,11 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         return block_results
 
     @handle_errors
-    async def refund_first_sender(self) -> str:
+    async def refund_first_sender(self, wait_confirmation: bool = False) -> str:
         """
         Sends remaining funds to the account opener.
 
+        :param wait_confirmation: If True, wait for confirmation
         :return: The hash of the sent block.
         :raises ValueError: If no funds are available or the refund account cannot be determined.
         """
@@ -766,5 +767,5 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         else:
             raise ValueError("Cannot determine refund account.")
 
-        response = await self.sweep(refund_account)
+        response = await self.sweep(refund_account, wait_confirmation=wait_confirmation)
         return response.unwrap()
