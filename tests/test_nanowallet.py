@@ -780,10 +780,10 @@ def test_nano_to_raw():
     result = nano_to_raw(input_nano)
     assert result == expected_raw, f"Expected {expected_raw}, but got {result}"
 
-    result = nano_to_raw(input_nano, decimal_places=6)
+    result = nano_to_raw(input_nano, precision=6)
     assert result == 0, f"Expected 0, but got {result}"
 
-    result = nano_to_raw(input_nano, decimal_places=12)
+    result = nano_to_raw(input_nano, precision=12)
     assert result == 5000000000000000000, f"Expected {expected_raw}, but got {result}"
 
     # Additional test cases
