@@ -18,9 +18,13 @@ from ..errors import (
     InsufficientBalanceError,
     InvalidAccountError,
     TimeoutException,
+    RpcError,
+    InvalidAmountError,
+    NanoException,
 )
 from .read_only import NanoWalletReadOnly, NanoWalletReadOnlyProtocol
 from ..libs.rpc import NanoWalletRpc
+from ..utils.decorators import NanoResult
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,6 +32,14 @@ logger = logging.getLogger(__name__)
 # Constants
 ZERO_HASH = "0" * 64
 DEFAULT_THRESHOLD_RAW = 10**24
+
+# Messages indicating retryable concurrency errors
+RETRYABLE_ERROR_MESSAGES = [
+    "Fork",  # Explicit fork detected by the node
+    "gap previous",  # The 'previous' block specified isn't the frontier (stale state)
+    "old block",  # Another potential message for stale state
+    # Add any other specific error strings that indicate temporary concurrency issues
+]
 
 
 class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
@@ -40,6 +52,30 @@ class NanoWalletKeyProtocol(NanoWalletReadOnlyProtocol, Protocol):
 
     async def send_raw(self, destination_account: str, amount: int) -> str:
         """Sends Nano to a destination account"""
+
+    async def send_with_retry(
+        self,
+        destination_account: str,
+        amount: Decimal | str | int,
+        max_retries: int = 5,
+        retry_delay_base: float = 0.1,
+        retry_delay_backoff: float = 1.5,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """Sends Nano with automatic retries on concurrency errors"""
+
+    async def send_raw_with_retry(
+        self,
+        destination_account: str,
+        amount_raw: int | str,
+        max_retries: int = 5,
+        retry_delay_base: float = 0.1,
+        retry_delay_backoff: float = 1.5,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """Sends raw Nano amount with automatic retries on concurrency errors"""
 
     async def sweep(
         self,
@@ -281,8 +317,78 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         )
         return response.unwrap()
 
-    @reload_after
-    @handle_errors
+    async def _attempt_send_raw_internal(
+        self,
+        destination_account: str,
+        amount_raw: int,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """
+        Internal helper to attempt sending without decorators. Raises exceptions on failure.
+
+        Args:
+            destination_account: The recipient account address
+            amount_raw: The amount to send in raw units
+            wait_confirmation: Whether to wait for confirmation
+            timeout: Timeout in seconds for the confirmation wait
+
+        Returns:
+            The block hash of the successfully sent transaction
+
+        Raises:
+            Various NanoException subclasses on failure
+        """
+        logger.debug(
+            "(Internal) Attempting to send %s raw to %s",
+            amount_raw,
+            destination_account,
+        )
+
+        if not destination_account:
+            logger.error("Invalid destination account: %s", destination_account)
+            raise InvalidAccountError("Destination can't be None")
+        if not AccountHelper.validate_account(destination_account):
+            logger.error("Invalid destination account: %s", destination_account)
+            raise InvalidAccountError("Invalid destination account.")
+
+        # Fetch current state *just before* building the block
+        params = await self._get_block_params()
+        new_balance = params["balance"] - int(amount_raw)
+
+        if params["balance"] == 0 or new_balance < 0:
+            msg = f"Insufficient balance for send! balance:{params['balance']} send_amount:{amount_raw}"
+            logger.error(msg)
+            raise InsufficientBalanceError(msg)
+
+        # Build and process
+        block = await self._build_block(
+            previous=params["previous"],
+            representative=params["representative"],
+            balance=new_balance,
+            destination_account=destination_account,
+        )
+        block_hash = await self._process_block(
+            block, f"send of {amount_raw} raw to {destination_account}"
+        )
+
+        # Handle confirmation *after* successful processing
+        if wait_confirmation:
+            confirmed = await self._wait_for_confirmation(
+                block_hash, timeout=timeout, raise_on_timeout=True
+            )
+            if (
+                not confirmed
+            ):  # Should have raised TimeoutException, but defensive check
+                logger.warning(
+                    "Block %s processed but confirmation timed out/failed.", block_hash
+                )
+
+        return block_hash
+
+    # Modify existing send_raw to use the internal helper
+    @reload_after  # Reloads state *after* successful send
+    @handle_errors  # Wraps final result/exceptions in NanoResult
     async def send_raw(
         self,
         destination_account: str,
@@ -293,47 +399,196 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         """
         Sends Nano to a destination account.
 
-        :param destination_account: The destination account
-        :param amount_raw: The amount in raw
-        :param wait_confirmation: If True, wait for confirmation
-        :param timeout: Max seconds to wait for confirmation
-        :return: The hash of the sent block
-        :raises InvalidAccountError: If destination account is invalid
-        :raises InsufficientBalanceError: If insufficient balance
+        Args:
+            destination_account: The destination account
+            amount_raw: The amount in raw
+            wait_confirmation: If True, wait for network confirmation
+            timeout: Max seconds to wait for confirmation
+
+        Returns:
+            The hash of the sent block
+
+        Raises:
+            This method performs a single send attempt. Use send_raw_with_retry for concurrency.
+            Exceptions are caught by @handle_errors and wrapped in NanoResult.
         """
-        logger.debug("Attempting to send %s raw to %s", amount_raw, destination_account)
+        # Basic validation before trying internal logic
+        try:
+            amount_val = int(amount_raw)
+            if amount_val <= 0:
+                raise InvalidAmountError("Send amount must be positive.")
+        except ValueError:
+            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}")
 
-        if not destination_account:
-            logger.error("Invalid destination account: %s", destination_account)
-            raise InvalidAccountError("Destination can't be None")
-
-        if not AccountHelper.validate_account(destination_account):
-            logger.error("Invalid destination account: %s", destination_account)
-            raise InvalidAccountError("Invalid destination account.")
-
-        params = await self._get_block_params()
-        new_balance = params["balance"] - int(amount_raw)
-
-        if params["balance"] == 0 or new_balance < 0:
-            msg = f"Insufficient balance for send! balance:{params['balance']} send_amount:{amount_raw}"
-            logger.error(msg)
-            raise InsufficientBalanceError(msg)
-
-        block = await self._build_block(
-            previous=params["previous"],
-            representative=params["representative"],
-            balance=new_balance,
-            destination_account=destination_account,
+        # Call the internal logic that raises exceptions
+        # @handle_errors will catch exceptions from here
+        return await self._attempt_send_raw_internal(
+            destination_account, amount_val, wait_confirmation, timeout
         )
 
-        result = await self._process_block(
-            block, f"send of {amount_raw} raw to {destination_account}"
-        )
-        if wait_confirmation:
-            await self._wait_for_confirmation(
-                result, timeout=timeout, raise_on_timeout=True
+    # NEW METHOD
+    @reload_after  # Reload after the *entire* successful retry operation
+    @handle_errors  # Handle final success or failure/exception
+    async def send_raw_with_retry(
+        self,
+        destination_account: str,
+        amount_raw: int | str,
+        max_retries: int = 5,
+        retry_delay_base: float = 0.1,  # seconds
+        retry_delay_backoff: float = 1.5,  # exponential backoff factor
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """
+        Attempts to send Nano (raw amount), automatically reloading state and retrying
+        on specific concurrency errors (Fork, gap previous).
+
+        Args:
+            destination_account: The recipient account address.
+            amount_raw: The amount to send in raw units.
+            max_retries: Maximum number of retry attempts (default: 5).
+            retry_delay_base: Initial delay in seconds before the first retry (default: 0.1).
+            retry_delay_backoff: Multiplies the delay for subsequent retries (default: 1.5).
+            wait_confirmation: Whether to wait for confirmation after the *successful* send.
+            timeout: Timeout in seconds for the confirmation wait.
+
+        Returns:
+            The block hash of the successfully sent transaction.
+
+        Raises:
+            Catches internal exceptions and returns NanoResult via @handle_errors.
+            Will raise NanoException via unwrap() if used like: (await wallet.send_raw_with_retry(...)).unwrap()
+        """
+        try:
+            amount_val = int(amount_raw)
+            if amount_val <= 0:
+                raise InvalidAmountError("Send amount must be positive.")
+        except ValueError:
+            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}")
+
+        retries = 0
+        last_error = None
+
+        while retries <= max_retries:
+            attempt = retries + 1
+            logger.debug(
+                f"Send attempt {attempt}/{max_retries + 1} for {amount_val} raw to {destination_account}"
             )
-        return result
+            try:
+                # *** Crucial: Reload state *before* each attempt ***
+                await self.reload()  # Fetch latest frontier etc. directly
+
+                # Call the internal, non-decorated send logic
+                block_hash = await self._attempt_send_raw_internal(
+                    destination_account, amount_val, wait_confirmation, timeout
+                )
+                # If it succeeded without raising exception:
+                logger.debug(f"Send attempt {attempt} SUCCEEDED. Hash: {block_hash}")
+                return block_hash  # Success! Return hash (@handle_errors will wrap it)
+
+            except RpcError as e:
+                last_error = e
+                # Check if the error message indicates a retryable condition
+                is_retryable = any(
+                    phrase in e.message for phrase in RETRYABLE_ERROR_MESSAGES
+                )
+
+                if is_retryable and retries < max_retries:
+                    retries += 1
+                    delay = retry_delay_base * (retry_delay_backoff ** (retries - 1))
+                    logger.warning(
+                        f"Send attempt {attempt} failed with retryable RPC error ('{e.message}'). "
+                        f"Retrying ({retries}/{max_retries}) after {delay:.2f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue  # Go to next iteration of the while loop
+                else:
+                    # Error is not retryable OR max retries reached
+                    logger.error(
+                        f"Send attempt {attempt} failed with RPC error ('{e.message}') and will not retry."
+                    )
+                    raise e  # Re-raise the exception (@handle_errors will catch it)
+
+            except (
+                InsufficientBalanceError,
+                InvalidAccountError,
+                InvalidAmountError,
+            ) as e:
+                # Non-retryable errors - fail immediately
+                last_error = e
+                logger.error(
+                    f"Send attempt {attempt} failed with non-retryable error: {e}"
+                )
+                raise e  # Re-raise the exception (@handle_errors will catch it)
+
+            except Exception as e:
+                # Catch any other unexpected errors during the attempt
+                last_error = e
+                logger.error(
+                    f"Send attempt {attempt} failed with unexpected error: {e}",
+                    exc_info=True,
+                )
+                # Treat unexpected errors as non-retryable for safety
+                raise NanoException(
+                    f"Unexpected error during send attempt: {e}",
+                    "UNEXPECTED_SEND_ERROR",
+                ) from e
+
+        # Should only be reached if loop finishes due to max_retries exceeded after a retryable error
+        logger.error(
+            f"Send failed after {max_retries + 1} attempts. Last error: {last_error}"
+        )
+        if last_error:
+            raise last_error  # Re-raise the last encountered error
+        else:
+            # Should not happen if loop logic is correct, but as fallback:
+            raise NanoException(
+                f"Send failed after {max_retries + 1} attempts.", "MAX_RETRIES_EXCEEDED"
+            )
+
+    # Add a convenience wrapper for Decimal amounts
+    @reload_after
+    @handle_errors
+    async def send_with_retry(
+        self,
+        destination_account: str,
+        amount: Decimal | str | int,
+        max_retries: int = 5,
+        retry_delay_base: float = 0.1,
+        retry_delay_backoff: float = 1.5,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """
+        Attempts to send Nano (Decimal amount), automatically reloading state and retrying
+        on specific concurrency errors (Fork, gap previous). See send_raw_with_retry for details.
+
+        Args:
+            destination_account: The recipient account address.
+            amount: The amount to send as Decimal, string, or int.
+            max_retries: Maximum number of retry attempts (default: 5).
+            retry_delay_base: Initial delay in seconds before the first retry (default: 0.1).
+            retry_delay_backoff: Multiplies the delay for subsequent retries (default: 1.5).
+            wait_confirmation: Whether to wait for confirmation after the *successful* send.
+            timeout: Timeout in seconds for the confirmation wait.
+
+        Returns:
+            The block hash of the successfully sent transaction.
+        """
+        amount_decimal = validate_nano_amount(amount)
+        amount_raw = _nano_to_raw(amount_decimal)
+        # Call the decorated send_raw_with_retry
+        result = await self.send_raw_with_retry(
+            destination_account,
+            amount_raw,
+            max_retries=max_retries,
+            retry_delay_base=retry_delay_base,
+            retry_delay_backoff=retry_delay_backoff,
+            wait_confirmation=wait_confirmation,
+            timeout=timeout,
+        )
+        # Need to unwrap/rewrap because send_raw_with_retry returns NanoResult
+        return result.unwrap()
 
     @reload_after
     @handle_errors

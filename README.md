@@ -19,6 +19,7 @@ Designed with type safety and robust error handling in mind.
 *   **Safe Error Handling:** Uses a `NanoResult[T]` wrapper to prevent unexpected crashes, promoting explicit error checks.
 *   **Automatic State Management:** Handles Nano's sequential block requirements automatically after operations.
 *   **Configurable:** Set default representatives, control work generation sources.
+*   **Automatic Handling of Concurrent Sends:** Uses a retry mechanism for automatic retries in case of send failures.
 
 ## Installation
 
