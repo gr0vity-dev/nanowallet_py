@@ -10,10 +10,12 @@ from .errors import (
     RpcError,
     InvalidSeedError,
     InvalidIndexError,
+    InvalidAmountError,
     BlockNotFoundError,
     InvalidAccountError,
     InsufficientBalanceError,
     TimeoutException,
+    NanoException,
 )
 from .utils.conversion import raw_to_nano, nano_to_raw
 from .utils.amount_operations import sum_received_amount
@@ -32,9 +34,11 @@ __all__ = [
     "AccountInfo",
     "NanoResult",
     # Errors
+    "NanoException",
     "RpcError",
     "InvalidSeedError",
     "InvalidIndexError",
+    "InvalidAmountError",
     "BlockNotFoundError",
     "InvalidAccountError",
     "InsufficientBalanceError",
