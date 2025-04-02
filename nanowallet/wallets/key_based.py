@@ -343,14 +343,15 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
         sweep_pending: bool = True,
         threshold_raw: int = DEFAULT_THRESHOLD_RAW,
         wait_confirmation: bool = True,
+        timeout: int = 30,
     ) -> str:
         """
         Transfers all funds from the current account to the destination account.
-
         :param destination_account: The account to receive the funds.
         :param sweep_pending: Whether to receive pending blocks before sending.
         :param threshold_raw: Minimum amount to consider for receiving pending blocks (in raw).
         :param wait_confirmation: If True, wait for confirmation
+        :param timeout: Max seconds to wait for confirmation
         :return: The hash of the sent block.
         :raises ValueError: If the destination account is invalid or insufficient balance.
         """
@@ -358,14 +359,34 @@ class NanoWalletKey(NanoWalletReadOnly, NanoWalletKeyProtocol):
             raise InvalidAccountError("Invalid destination account.")
 
         if sweep_pending:
-            await self.receive_all(threshold_raw=threshold_raw)
+            receive_result: NanoResult[List[ReceivedBlock]] = await self.receive_all(
+                threshold_raw=threshold_raw,
+                wait_confirmation=False,
+            )
+            if not receive_result:
+                logger.debug(
+                    "Sweep failed: Error during receive_all: %s", receive_result.error
+                )
+                # Propagate the error result
+                raise NanoException(receive_result.error, receive_result.error_code)
+            logger.debug(
+                "Sweep: Pending blocks received successfully (or none to receive)."
+            )
 
-        response = await self.send_raw(
+        send_result: NanoResult[str] = await self.send_raw(
             destination_account,
             self._balance_info.balance_raw,
             wait_confirmation=wait_confirmation,
+            timeout=timeout,
         )
-        return response.unwrap()
+
+        if not send_result:
+            logger.error("Sweep failed: Error during send_raw: %s", send_result.error)
+            raise NanoException(send_result.error, send_result.error_code)
+
+        final_hash = send_result.unwrap()
+        logger.debug("Sweep successful. Sent block hash: %s", final_hash)
+        return final_hash  # @handle_errors will wrap this in NanoResult
 
     @reload_after
     @handle_errors

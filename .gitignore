@@ -2,7 +2,9 @@ build/
 dist/
 nanowallet.egg-info
 venv/
+.venv/
 ven/
 debug.py
 _manage/
 **__pycache__**
+debug**
