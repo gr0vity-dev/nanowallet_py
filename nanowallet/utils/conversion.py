@@ -3,6 +3,7 @@ from typing import Union, List, Dict
 from nanowallet.errors import InvalidAmountError
 from .validation import validate_nano_amount
 
+
 RAW_PER_NANO = Decimal("10") ** 30
 
 
@@ -60,7 +61,7 @@ def raw_to_nano(amount_raw: int, decimal_places=6) -> Decimal:
     return _raw_to_nano(amount_raw, decimal_places=decimal_places)
 
 
-def nano_to_raw(amount_nano: Decimal | str | int, decimal_places=30) -> int:
+def nano_to_raw(amount_nano: Decimal | str | int, precision=30) -> int:
     """
     Converts Nano amount to raw amount.
 
@@ -76,5 +77,5 @@ def nano_to_raw(amount_nano: Decimal | str | int, decimal_places=30) -> int:
     """
     amount_decimal = validate_nano_amount(amount_nano)
     return _nano_to_raw(
-        _raw_to_nano(_nano_to_raw(amount_decimal), decimal_places=decimal_places)
+        _raw_to_nano(_nano_to_raw(amount_decimal), decimal_places=precision)
     )
