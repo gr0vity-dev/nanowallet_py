@@ -18,7 +18,6 @@ from ..utils.decorators import handle_errors
 
 logger = logging.getLogger(__name__)
 ZERO_HASH = "0" * 64
-DEFAULT_THRESHOLD_RAW = 10**24
 
 # Forward declarations for type hints
 T = TypeVar("T")

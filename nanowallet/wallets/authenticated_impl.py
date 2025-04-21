@@ -653,7 +653,7 @@ class NanoWalletAuthenticated(
     @handle_errors
     async def receive_all(
         self,
-        threshold_raw: float = DEFAULT_THRESHOLD_RAW,
+        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> List[ReceivedBlock]:
