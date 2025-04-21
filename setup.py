@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="nanowallet",
-    version="0.1.2",
+    version="0.1.3",
     packages=find_packages(),
     install_requires=[
         "nano_lib_py==0.5.1",
