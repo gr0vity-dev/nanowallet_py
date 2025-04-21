@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanowallet"
+version = "0.1.3"
+description = "async nano library for easy account management"
+readme = "README.md"
+authors = [
+    {name = "gr0vity"}
+]
+requires-python = ">=3.7"
+dependencies = [
+    "nano_lib_py==0.5.1",
+    "nanorpc==0.1.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/gr0vity-dev/nanowallet_py"
