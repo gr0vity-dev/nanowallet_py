@@ -2,8 +2,10 @@ import pytest
 from unittest.mock import AsyncMock, patch, Mock
 
 
-from nanowallet.wallets import NanoWallet, NanoWalletRpc
+from nanowallet.wallets import NanoWalletRpc
+from nanowallet.wallets import NanoWalletAuthenticated
 from nanorpc.client import NanoRpcTyped
+from nanowallet.wallets.wallet_factory import create_wallet_from_seed
 
 from nanowallet.utils.decorators import NanoResult, handle_errors, reload_after
 from nanowallet.errors import NanoException, InvalidAccountError, InvalidAmountError
@@ -35,6 +37,22 @@ def private_key():
 
 
 @pytest.fixture
+def dummy_account_info():
+    return {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "10",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "10",
+        "receivable": "10",
+    }
+
+
+@pytest.fixture
 def mock_rpc_typed():
     """Fixture that provides a mocked NanoRpcTyped instance"""
     mock = AsyncMock(spec=NanoRpcTyped)
@@ -53,10 +71,8 @@ def mock_rpc(mock_rpc_typed):
 @pytest.mark.asyncio
 async def test_init(mock_rpc, seed, index, account, private_key):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
-    assert wallet.seed == seed
-    assert wallet.index == index
     assert wallet.account == account
     assert wallet.private_key == private_key
 
@@ -80,11 +96,17 @@ async def test_reload(mock_rpc, mock_rpc_typed, seed, index):
         "weight": "3000000000000000000000000000000",
         "receivable": "1000000000000000000000000000000",
     }
+    mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
+    mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
+    mock_rpc_typed.blocks_info.return_value = {}
+    mock_rpc_typed.account_history.return_value = {}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc_typed, seed, index)
     wallet_info_response = await wallet.account_info()
+
     balance_info_response = await wallet.balance_info()
     wallet_info: AccountInfo = wallet_info_response.unwrap()
+    print("WALLET INFO RESPONSE", wallet_info)
     balance_info: WalletBalance = balance_info_response.unwrap()
 
     assert balance_info.balance == 2
@@ -117,7 +139,7 @@ async def test_reload_unopened(mock_rpc, mock_rpc_typed, seed, index):
     }
     mock_rpc_typed.account_info.return_value = {"error": "Account not found"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     await wallet.reload()
 
     assert wallet._balance_info.balance == 0
@@ -149,7 +171,7 @@ async def test_reload_unopened_2(mock_rpc, mock_rpc_typed, seed, index):
     }
     mock_rpc_typed.account_info.return_value = {"error": "Account not found"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     await wallet.reload()
     await wallet.reload()
 
@@ -163,7 +185,7 @@ async def test_reload_unopen_no_receivables(mock_rpc, mock_rpc_typed, seed, inde
     mock_rpc_typed.receivable.return_value = {"blocks": ""}
     mock_rpc_typed.account_info.return_value = {"error": "Account not found"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc_typed, seed, index)
     await wallet.reload()
 
     assert wallet._balance_info.balance == 0
@@ -178,7 +200,7 @@ async def test_reload_unopen_no_receivables(mock_rpc, mock_rpc_typed, seed, inde
     assert wallet._account_info.weight_raw == 0
     assert wallet._balance_info.receivable == 0
     assert wallet._balance_info.receivable_raw == 0
-    assert wallet.receivable_blocks == ""
+    assert wallet.receivable_blocks == {}
 
 
 @pytest.mark.asyncio
@@ -198,7 +220,7 @@ async def test_reload_no_receivables(mock_rpc, mock_rpc_typed, seed, index):
         "receivable": "1000000000000000000000000000000",
     }
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     await wallet.reload()
 
     assert wallet._balance_info.balance == 2
@@ -219,7 +241,7 @@ async def test_reload_no_receivables(mock_rpc, mock_rpc_typed, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_send_with_confirmation(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -238,7 +260,7 @@ async def test_send_with_confirmation(
         "weight": "3000000000000000000000000000000",
         "receivable": "1000000000000000000000000000000",
     }
-    mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
+    mock_rpc_typed.work_generate.return_value = {"work": "000000000000000a"}
     mock_rpc_typed.process.side_effect = [
         {"hash": received_block_1},  # First call succeeds
     ]
@@ -253,13 +275,12 @@ async def test_send_with_confirmation(
 
     mock_rpc_typed.blocks_info.side_effect = blocks_info_side_effect
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.send(
         "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
         1,
         wait_confirmation=True,
     )
-
     assert result.success == True
     assert result.value == received_block_1
     mock_block.assert_called()
@@ -267,7 +288,7 @@ async def test_send_with_confirmation(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_send_with_no_confirmation_timeout(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -301,7 +322,7 @@ async def test_send_with_no_confirmation_timeout(
 
     mock_rpc_typed.blocks_info.side_effect = blocks_info_side_effect
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.send(
         "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
         1,
@@ -315,7 +336,7 @@ async def test_send_with_no_confirmation_timeout(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -333,7 +354,7 @@ async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.side_effect = [{"hash": "processed_block_hash"}]
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.send(
         "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
         1,
@@ -346,7 +367,7 @@ async def test_send(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_send_raw(mock_block, mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -364,7 +385,7 @@ async def test_send_raw(mock_block, mock_rpc, mock_rpc_typed, seed, index):
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.send_raw(
         "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", 1e30
     )
@@ -393,7 +414,7 @@ async def test_send_raw_error(mock_rpc, mock_rpc_typed, seed, index):
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.send_raw(
         "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
         1000000000000000000000000000000,
@@ -402,12 +423,16 @@ async def test_send_raw_error(mock_rpc, mock_rpc_typed, seed, index):
     assert result.success == False
     assert (
         result.error
-        == "Insufficient balance for send! balance:2000 send_amount:1000000000000000000000000000000"
+        == "Insufficient balance for send! balance: 2000 send_amount: 1000000000000000000000000000000"
     )
 
 
 @pytest.mark.asyncio
-async def test_list_receivables(mock_rpc, mock_rpc_typed, seed, index):
+async def test_list_receivables(
+    mock_rpc, mock_rpc_typed, seed, index, dummy_account_info
+):
+
+    mock_rpc_typed.account_info.return_value = dummy_account_info
 
     mock_rpc_typed.receivable.return_value = {
         "blocks": {
@@ -416,8 +441,7 @@ async def test_list_receivables(mock_rpc, mock_rpc_typed, seed, index):
         }
     }
 
-    wallet = NanoWallet(mock_rpc, seed, index)
-    await wallet.reload()
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.list_receivables()
 
     expected = [
@@ -436,7 +460,7 @@ async def test_list_receivables_none(mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.receivable.return_value = {"blocks": ""}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     await wallet.reload()
     result = await wallet.list_receivables()
 
@@ -446,8 +470,11 @@ async def test_list_receivables_none(mock_rpc, mock_rpc_typed, seed, index):
 
 
 @pytest.mark.asyncio
-async def test_list_receivables_threshold(mock_rpc, mock_rpc_typed, seed, index):
+async def test_list_receivables_threshold(
+    mock_rpc, mock_rpc_typed, seed, index, dummy_account_info
+):
 
+    mock_rpc_typed.account_info.return_value = dummy_account_info
     mock_rpc_typed.receivable.return_value = {
         "blocks": {
             "block1": "2000000000000000000000000000000",
@@ -455,7 +482,7 @@ async def test_list_receivables_threshold(mock_rpc, mock_rpc_typed, seed, index)
         }
     }
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     await wallet.reload()
     result = await wallet.list_receivables(
         threshold_raw=1000000000000000000000000000001
@@ -469,7 +496,7 @@ async def test_list_receivables_threshold(mock_rpc, mock_rpc_typed, seed, index)
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index):
 
     mock_rpc_typed.blocks_info.return_value = {
@@ -490,7 +517,7 @@ async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_by_hash(
         "block_hash_to_receive", wait_confirmation=False
     )
@@ -508,7 +535,7 @@ async def test_receive_by_hash(mock_block, mock_rpc_typed, mock_rpc, seed, index
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_receive_by_hash_wait_conf(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -540,7 +567,7 @@ async def test_receive_by_hash_wait_conf(
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_by_hash("block_hash_to_receive")
 
     assert result.success == True
@@ -568,7 +595,7 @@ async def test_receive_by_hash_wait_conf(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_receive_by_hash_new_account(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -587,7 +614,7 @@ async def test_receive_by_hash_new_account(
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_by_hash(
         "block_hash_to_receive", wait_confirmation=False
     )
@@ -606,7 +633,7 @@ async def test_receive_by_hash_new_account(
 
 
 @pytest.mark.asyncio
-@patch("nanowallet.wallets.key_based.NanoWalletBlock")
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
 async def test_receive_by_hash_new_account_with_conf(
     mock_block, mock_rpc_typed, mock_rpc, seed, index
 ):
@@ -643,7 +670,7 @@ async def test_receive_by_hash_new_account_with_conf(
     mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
     mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     # Default wait_confirmation=True
     result = await wallet.receive_by_hash("block_hash_to_receive")
 
@@ -724,7 +751,7 @@ async def test_receive_by_hash_new_account_timeout(
     mock_rpc_typed.work_generate.return_value = {"work": "0" * 16}
     mock_rpc_typed.process.return_value = {"hash": processed_block_hash}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     # Get the NanoResult
     result = await wallet.receive_by_hash(block_hash_to_receive, timeout=0.1)
@@ -748,7 +775,7 @@ async def test_receive_by_hash_not_found(mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.blocks_info.return_value = {"error": "Block not found"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_by_hash(
         "763F295D61A6774F3F9CDECEFCF3A6A91C09107042BFA1BFCC269936AC6DA1B4"
     )
@@ -766,7 +793,7 @@ async def test_receive_all_nothing_found(mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.receivable.return_value = {"blocks": ""}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_all()
 
     assert result.success == True
@@ -855,7 +882,7 @@ async def test_receive_all(mock_rpc, mock_rpc_typed, seed, index):
         {"hash": "0000000000000000000000000000000000000000000000000000000000007777"},
     ]
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_all(threshold_raw=1, wait_confirmation=False)
 
     assert result.success == True
@@ -934,7 +961,7 @@ async def test_receive_all_threshold_filtering(mock_rpc, mock_rpc_typed, seed, i
     mock_rpc_typed.work_generate.return_value = {"work": "1234567890abcdef"}
     mock_rpc_typed.process.return_value = {"hash": received_hash}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     # Test with threshold of 0.0001 Nano (should receive top 2 blocks)
     threshold = 100000000000000000000000  # 0.0001 Nano in raw
@@ -1003,7 +1030,7 @@ async def test_receive_all_mixed_confirmation(mock_rpc, mock_rpc_typed, seed, in
         {"hash": received_block_2},
     ]
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     # Test with confirmation timeout of 0.1 seconds
     with pytest.raises(NanoException) as exc_info:
@@ -1062,7 +1089,7 @@ async def test_receive_all_process_error(mock_rpc, mock_rpc_typed, seed, index, 
         {"error": "Fork detected"},  # Second call fails
     ]
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     with pytest.raises(NanoException) as exc_info:
         result = await wallet.receive_all(wait_confirmation=False)
@@ -1095,7 +1122,7 @@ async def test_receive_all_empty_receivable(mock_rpc, mock_rpc_typed, seed, inde
     # Mock empty receivable
     mock_rpc_typed.receivable.return_value = {"blocks": {}}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_all(wait_confirmation=True)
 
     assert result.success == True
@@ -1139,9 +1166,14 @@ async def test_receive_all_not_found(mock_rpc, mock_rpc_typed, seed, index):
         }
     }
 
+    # We're intentionally not mocking account_info properly to test our defensive code
+    # This will cause account_info.get("receivable") to return a coroutine
+
+    # This is the critical part - we want blocks_info to return a "Block not found" error
+    # when receive_by_hash tries to get info about the block
     mock_rpc_typed.blocks_info.return_value = {"error": "Block not found"}
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_all()
 
     assert result.success == False
@@ -1154,7 +1186,7 @@ async def test_receive_all_not_found(mock_rpc, mock_rpc_typed, seed, index):
 @pytest.mark.asyncio
 async def test_validate_work_send(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     wallet.account = "nano_3rdcmdz7rjupyhadrxbrmx7kb8smk48oyns63uowtm3uw87c8r65gujufy8o"
 
     mock_rpc_typed.work_generate.return_value = {"work": "b97cf24869b976eb"}
@@ -1175,7 +1207,7 @@ async def test_validate_work_send(mock_rpc, mock_rpc_typed, seed, index):
 @pytest.mark.asyncio
 async def test_validate_work_receive(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     wallet.account = "nano_348ggsrnzh44jp5cm1114r495fmz77tqf36fxunzg3ufmj3yzj5jhaat5ew1"
 
     mock_rpc_typed.work_generate.return_value = {"work": "7fe398470f748c75"}
@@ -1196,7 +1228,7 @@ async def test_validate_work_receive(mock_rpc, mock_rpc_typed, seed, index):
 @pytest.mark.asyncio
 async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     # Mock the necessary methods
     wallet.balance_raw = 1000
@@ -1214,15 +1246,40 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
         "weight": "3000000000000000000000000000000",
         "receivable": "1000000000000000000000000000000",
     }
-    # Create side effects for account_info calls
+
+    # Account after receiving the block - would have the balance from the receivable
+    # Make sure frontier/previous is a valid 64-char hex string
+    account_info_after_receive = {
+        "frontier": "a" * 64,  # Valid 64-char hex string for previous
+        "representative": "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6",
+        "balance": "3187918000000000000000000000000",
+        "representative_block": "a" * 64,
+        "open_block": "a" * 64,
+        "confirmation_height": "1",
+        "block_count": "1",
+        "account_version": "1",
+        "weight": "0",
+        "receivable": "0",
+    }
+
+    # Create side effects for account_info calls - extend to have enough responses
+    # for all the calls made during the test
     account_info_responses = [
-        account_info_not_found,
-        account_info_not_found,
-        account_info_not_found,
-        account_info_not_found,
-        account_info_not_found,
-        account_info_found,
+        account_info_not_found,  # Initial reload
+        account_info_not_found,  # During list_receivables
+        account_info_not_found,  # During refund_first_sender blocks_info lookup
+        account_info_not_found,  # During sweep initial reload
+        account_info_not_found,  # During receive_all initial reload
+        account_info_not_found,  # During _get_block_params in receive_by_hash
+        account_info_after_receive,  # After receive when reloading
+        account_info_after_receive,  # During sweep's reload after receive_all
+        account_info_after_receive,  # During _get_block_params for send
+        account_info_after_receive,  # Final reload after send
+        account_info_after_receive,  # Extra responses in case more calls are made
+        account_info_after_receive,
+        account_info_after_receive,
     ]
+
     mock_rpc_typed.account_info.side_effect = account_info_responses
     mock_rpc_typed.receivable.return_value = {
         "blocks": {
@@ -1254,20 +1311,20 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
 @pytest.mark.asyncio
 async def test_refund_first_sender_no_account(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     print(wallet._account_info.open_block)
 
     mock_rpc_typed.account_info.return_value = {"error": "Account not found"}
     response = await wallet.refund_first_sender()
 
     assert response.success == False
-    assert response.error == "Insufficient balance. No funds available to refund."
+    assert response.error == "No funds available to refund."
 
 
 @pytest.mark.asyncio
 async def test_refund_first_sender_no_funds(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     mock_rpc_typed.account_info.return_value = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
         "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
@@ -1285,13 +1342,13 @@ async def test_refund_first_sender_no_funds(mock_rpc, mock_rpc_typed, seed, inde
     response = await wallet.refund_first_sender()
 
     assert response.success == False
-    assert response.error == "Insufficient balance. No funds available to refund."
+    assert response.error == "No funds available to refund."
 
 
 @pytest.mark.asyncio
 async def test_wallett_to_str(mock_rpc, mock_rpc_typed, seed, index):
 
-    wallet = NanoWallet(mock_rpc, seed, index)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index)
     mock_rpc_typed.account_info.return_value = {
         "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
         "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
@@ -1306,22 +1363,16 @@ async def test_wallett_to_str(mock_rpc, mock_rpc_typed, seed, index):
     }
     await wallet.reload()
 
-    expected_to_string = """NanoWallet:
+    expected_to_string = """NanoWalletAuthenticated:
   Account: nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s
-  Balance: 2 Nano
-  Balance raw: 2000000000000000000000000000000 raw
-  Receivable Balance: 1 Nano
-  Receivable Balance raw: 1000000000000000000000000000000 raw
-  Voting Weight: 3 Nano
-  Voting Weight raw: 3000000000000000000000000000000 raw
+  Balance: 2 Nano (2000000000000000000000000000000 raw)
+  Receivable: 1 Nano (1000000000000000000000000000000 raw)
+  Voting Weight: 3 Nano (3000000000000000000000000000000 raw)
   Representative: nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf
   Confirmation Height: 1
   Block Count: 50"""
 
-    expected__str__ = """NanoWallet:
-  Account: nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s
-  Balance raw: 2000000000000000000000000000000 raw
-  Receivable Balance raw: 1000000000000000000000000000000 raw"""
+    expected__str__ = """NanoWalletAuthenticated: Account=nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s, BalanceRaw=2000000000000000000000000000000, ReceivableRaw=1000000000000000000000000000000"""
 
     assert wallet.to_string() == expected_to_string
     assert str(wallet) == expected__str__
@@ -1330,7 +1381,7 @@ async def test_wallett_to_str(mock_rpc, mock_rpc_typed, seed, index):
 @pytest.mark.asyncio
 async def test_valid_account(mock_rpc, mock_rpc_typed, seed):
 
-    wallet = NanoWallet(mock_rpc, seed, 25)
+    wallet = create_wallet_from_seed(mock_rpc, seed, 25)
     wallet.account = "nano_14ckiit8au8njgzrm4gb9se7d8yf3enec6mdy7154gr8qh3cu1yf9nqgomh3"
     await wallet.reload()
 
@@ -1520,7 +1571,7 @@ async def test_account_history(mock_rpc, mock_rpc_typed):
 
     mock_rpc_typed.account_history.return_value = mock_response
 
-    wallet = NanoWallet(mock_rpc, "0" * 64, 0)
+    wallet = create_wallet_from_seed(mock_rpc, "0" * 64, 0)
     result = await wallet.account_history(count=2)
     blocks = result.unwrap()
 

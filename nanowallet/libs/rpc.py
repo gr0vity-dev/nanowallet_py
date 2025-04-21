@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class NanoRpcProtocol(Protocol):
+class INanoRpc(Protocol):
     """Protocol defining required RPC operations"""
 
     async def account_info(
@@ -157,6 +157,9 @@ class NanoWalletRpc:
         """
         logger.debug("Generating work for hash: %s", block_hash)
         response = await self._rpc.work_generate(block_hash, use_peers=use_peers)
+        logger.debug(
+            "Work generated for hash: %s, %s", block_hash, response.get("work")
+        )
         try_raise_error(response)
         return response
 

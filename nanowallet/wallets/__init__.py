@@ -1,13 +1,17 @@
-from .read_only import NanoWalletReadOnly
-from .key_based import NanoWalletKey
-from .seed_based import NanoWallet
+from .protocols import IReadOnlyWallet, IAuthenticatedWallet
+from .read_only_impl import NanoWalletReadOnly
+from .authenticated_impl import NanoWalletAuthenticated
+from .wallet_factory import create_wallet_from_seed, create_wallet_from_private_key
 from ..libs.rpc import NanoWalletRpc
-from ..utils import NanoResult
+from ..utils.decorators import NanoResult
 
 __all__ = [
+    "IReadOnlyWallet",
+    "IAuthenticatedWallet",
     "NanoWalletReadOnly",
-    "NanoWalletKey",
-    "NanoWallet",
+    "NanoWalletAuthenticated",
+    "create_wallet_from_seed",
+    "create_wallet_from_private_key",
     "NanoWalletRpc",
     "NanoResult",
 ]

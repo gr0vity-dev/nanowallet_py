@@ -1,8 +1,11 @@
 # nanowallet/__init__.py
 from .wallets import (
+    IReadOnlyWallet,
+    IAuthenticatedWallet,
     NanoWalletReadOnly,
-    NanoWalletKey,
-    NanoWallet,
+    NanoWalletAuthenticated,
+    create_wallet_from_seed,
+    create_wallet_from_private_key,
 )
 from .models import WalletConfig, WalletBalance, AccountInfo
 from .utils import NanoResult
@@ -23,10 +26,14 @@ from .utils.validation import validate_nano_amount, validate_account
 from .libs.rpc import NanoWalletRpc
 
 __all__ = [
+    # Protocols
+    "IReadOnlyWallet",
+    "IAuthenticatedWallet",
     # Wallet classes
     "NanoWalletReadOnly",
-    "NanoWalletKey",
-    "NanoWallet",
+    "NanoWalletAuthenticated",
+    "create_wallet_from_seed",
+    "create_wallet_from_private_key",
     "NanoWalletRpc",
     # Models
     "WalletConfig",
