@@ -4,7 +4,6 @@ from nano_lib_py.accounts import (
     generate_account_private_key,
     get_account_id,
     AccountIDPrefix,
-    InvalidAccount,
 )
 from ..errors import InvalidAccountError
 

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from decimal import Decimal
 
 from ..libs.account_helper import AccountHelper
@@ -323,8 +323,8 @@ class NanoWalletAuthenticated(
             amount_val = int(amount_raw)
             if amount_val <= 0:
                 raise InvalidAmountError("Send amount must be positive")
-        except ValueError:
-            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}")
+        except ValueError as e:
+            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}") from e
 
         return await self._internal_send_raw(
             destination_account, amount_val, wait_confirmation, timeout
@@ -405,7 +405,11 @@ class NanoWalletAuthenticated(
         while retries <= max_retries:
             attempt = retries + 1
             logger.debug(
-                f"Send attempt {attempt}/{max_retries+1} for {amount_val} raw to {destination_account}"
+                "Send attempt %s/%s for %s raw to %s",
+                attempt,
+                max_retries + 1,
+                amount_val,
+                destination_account,
             )
 
             try:
@@ -417,7 +421,11 @@ class NanoWalletAuthenticated(
                     destination_account, amount_val, wait_confirmation, timeout
                 )
 
-                logger.info(f"Send attempt {attempt} SUCCEEDED. Hash: {block_hash}")
+                logger.info(
+                    "Send attempt %s SUCCEEDED. Hash: %s",
+                    attempt,
+                    block_hash,
+                )
                 return block_hash  # Success
 
             except RpcError as e:
@@ -431,15 +439,24 @@ class NanoWalletAuthenticated(
                     retries += 1
                     delay = retry_delay_base * (retry_delay_backoff ** (retries - 1))
                     logger.warning(
-                        f"Send attempt {attempt} failed with retryable RPC error ('{e.message}'). "
-                        f"Retrying ({retries}/{max_retries}) after {delay:.2f}s..."
+                        "Send attempt %s failed with retryable RPC error ('%s'). "
+                        "Retrying (%s/%s) after %.2fs...",
+                        attempt,
+                        e.message,
+                        retries,
+                        max_retries,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     continue  # Try again
                 else:
                     logger.error(
-                        f"Send attempt {attempt} failed with RPC error ('{e.message}') "
-                        f"and will not retry (retryable={is_retryable}, retries={retries})."
+                        "Send attempt %s failed with RPC error ('%s') "
+                        "and will not retry (retryable=%s, retries=%s).",
+                        attempt,
+                        e.message,
+                        is_retryable,
+                        retries,
                     )
                     raise e  # Fail permanently
 
@@ -451,7 +468,9 @@ class NanoWalletAuthenticated(
                 # Non-retryable errors
                 last_error = e
                 logger.error(
-                    f"Send attempt {attempt} failed with non-retryable error: {e}"
+                    "Send attempt %s failed with non-retryable error: %s",
+                    attempt,
+                    e,
                 )
                 raise e  # Fail permanently
 
@@ -459,7 +478,9 @@ class NanoWalletAuthenticated(
                 # Confirmation timeout
                 last_error = e
                 logger.error(
-                    f"Send attempt {attempt} failed due to confirmation timeout: {e}"
+                    "Send attempt %s failed due to confirmation timeout: %s",
+                    attempt,
+                    e,
                 )
                 raise e  # Fail permanently
 
@@ -467,8 +488,9 @@ class NanoWalletAuthenticated(
                 # Unexpected errors
                 last_error = e
                 logger.error(
-                    f"Send attempt {attempt} failed with unexpected error: {e}",
-                    exc_info=True,
+                    "Send attempt %s failed with unexpected error: %s",
+                    attempt,
+                    e,
                 )
 
                 if not isinstance(e, NanoException):
@@ -481,7 +503,9 @@ class NanoWalletAuthenticated(
 
         # If we get here, all retries failed
         logger.error(
-            f"Send failed after {max_retries+1} attempts. Last error: {last_error}"
+            "Send failed after %s attempts. Last error: %s",
+            max_retries + 1,
+            last_error,
         )
 
         if last_error:
@@ -490,7 +514,7 @@ class NanoWalletAuthenticated(
             # Should not reach here if we made at least one attempt
             raise NanoException(
                 f"Send failed after {max_retries+1} attempts.", "MAX_RETRIES_EXCEEDED"
-            )
+            ) from e
 
     @reload_after
     @handle_errors
@@ -660,7 +684,7 @@ class NanoWalletAuthenticated(
             logger.info("No receivable blocks found matching criteria.")
             return []
 
-        logger.info(f"Found {len(receivables)} receivable blocks to process.")
+        logger.info("Found %s receivable blocks to process.", len(receivables))
         processed_blocks = []
 
         # Process each receivable block
@@ -697,7 +721,8 @@ class NanoWalletAuthenticated(
                 raise NanoException(str(e), "RECEIVE_BLOCK_ERROR") from e
 
         logger.info(
-            f"Receive_all finished. Successfully processed {len(processed_blocks)} blocks."
+            "Receive_all finished. Successfully processed %s blocks.",
+            len(processed_blocks),
         )
         return processed_blocks
 
@@ -758,7 +783,7 @@ class NanoWalletAuthenticated(
                 raise NanoException(
                     f"Sweep failed during receive_all: {e}",
                     getattr(e, "code", "SWEEP_RECEIVE_ERROR"),
-                )
+                ) from e
 
         # Get current balance
         current_balance_raw = self._balance_info.balance_raw
@@ -791,7 +816,9 @@ class NanoWalletAuthenticated(
             logger.error("Sweep failed: Error during send: %s", str(e))
             if isinstance(e, NanoException):
                 raise
-            raise NanoException(f"Sweep failed during send: {e}", "SWEEP_SEND_ERROR")
+            raise NanoException(
+                f"Sweep failed during send: {e}", "SWEEP_SEND_ERROR"
+            ) from e
 
     @handle_errors
     async def refund_first_sender(self, wait_confirmation: bool = False) -> str:

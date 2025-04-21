@@ -36,8 +36,8 @@ def create_wallet_from_seed(
         raise InvalidSeedError("Seed must be a 64 character hex string")
     try:
         int(seed, 16)  # Validate hex
-    except ValueError:
-        raise InvalidSeedError("Seed must be a valid hex string")
+    except ValueError as e:
+        raise InvalidSeedError("Seed must be a valid hex string") from e
 
     # Validate index
     if not isinstance(index, int) or not (0 <= index <= MAX_INDEX):
@@ -81,11 +81,13 @@ def create_wallet_from_private_key(
         raise InvalidSeedError("Seed must be a 64 character hex string")
     try:
         int(private_key, 16)  # Validate hex
-    except ValueError:
-        raise InvalidSeedError("Seed must be a valid hex string")
+    except ValueError as e:
+        raise InvalidSeedError("Seed must be a valid hex string") from e
 
     # Convert seed to lowercase for consistency
     private_key_lower = private_key.lower()
 
     # Create and return the authenticated wallet implementation
-    return NanoWalletAuthenticated(rpc=rpc, private_key=private_key, config=config)
+    return NanoWalletAuthenticated(
+        rpc=rpc, private_key=private_key_lower, config=config
+    )

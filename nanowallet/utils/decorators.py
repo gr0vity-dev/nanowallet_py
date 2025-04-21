@@ -9,6 +9,10 @@ T = TypeVar("T")
 
 
 class NanoResult(Generic[T]):
+    """
+    Represents the result of an operation with optional value and error details.
+    """
+
     def __init__(
         self,
         value: Optional[T] = None,  # Allow None but preserve type T
@@ -21,6 +25,9 @@ class NanoResult(Generic[T]):
 
     @property
     def success(self) -> bool:
+        """
+        Checks if the operation was successful.
+        """
         return self.error is None
 
     def __bool__(self) -> bool:
@@ -42,6 +49,10 @@ R = TypeVar("R")
 
 
 def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R]]:
+    """
+    Decorator to reload the wallet after the operation.
+    """
+
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
         try:
@@ -55,8 +66,12 @@ def reload_after(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R
 
 
 def handle_errors(
-    func: Callable[..., Awaitable[R]]
+    func: Callable[..., Awaitable[R]],
 ) -> Callable[..., Awaitable[NanoResult[R]]]:  # Return NanoResult parameterized with R
+    """
+    Decorator to handle errors and return a NanoResult.
+    """
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs) -> NanoResult[R]:
         try:

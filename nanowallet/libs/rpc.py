@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Optional, Protocol
+import logging
+
 from nanorpc.client import NanoRpcTyped
 from nanowallet.errors import try_raise_error, block_not_found, BlockNotFoundError
-import logging
 
 # Configure logging
 logger = logging.getLogger(__name__)

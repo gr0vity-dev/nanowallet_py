@@ -1,11 +1,10 @@
 import asyncio
 import time
 import logging
-from typing import Optional, Dict, Any, List, TypeVar, Type
+from typing import Optional, Dict, Any, TypeVar
 
 from ..libs.rpc import INanoRpc
 from ..libs.block import NanoWalletBlock
-from ..libs.account_helper import AccountHelper
 from ..models import WalletConfig, WalletBalance, AccountInfo
 from ..errors import (
     account_not_found,
@@ -14,7 +13,6 @@ from ..errors import (
     BlockNotFoundError,
     TimeoutException,
     NanoException,
-    RpcError,
 )
 from ..utils.decorators import handle_errors
 
@@ -327,7 +325,7 @@ class BlockOperationsMixin(RpcInteractionMixin):
                 delay = min(delay * 1.5, max_delay)
                 attempt += 1
 
-            except Exception as e:
+            except Exception:
                 logger.exception("Error during confirmation check for %s", block_hash)
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, max_delay)

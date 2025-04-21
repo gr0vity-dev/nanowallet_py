@@ -40,4 +40,4 @@ def validate_nano_amount(amount: Union[str, Decimal, int]) -> Decimal:
             raise InvalidAmountError("Negative values are not allowed")
         return amount_decimal
     except (ValueError, TypeError, ArithmeticError) as e:
-        raise InvalidAmountError(f"Invalid amount format: {e}")
+        raise InvalidAmountError(f"Invalid amount format: {e}") from e

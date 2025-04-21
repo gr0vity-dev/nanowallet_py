@@ -1,5 +1,6 @@
-from nano_lib_py.blocks import Block
 from typing import Optional
+from nano_lib_py.blocks import Block
+
 from nanowallet.libs.account_helper import AccountHelper
 
 
