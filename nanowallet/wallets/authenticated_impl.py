@@ -647,7 +647,7 @@ class NanoWalletAuthenticated(
             logger.exception(
                 "Exception during receive_by_hash for block %s", block_hash
             )
-            raise
+            raise e
 
     @reload_after
     @handle_errors

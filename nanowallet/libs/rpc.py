@@ -77,6 +77,24 @@ class NanoWalletRpc:
         )
         logger.debug("Initialized RPC client with URL: %s", url)
 
+    def _ensure_dict_response(self, response):
+        """
+        Ensures the RPC response is a dictionary.
+
+        Args:
+            response: The response from the RPC call
+
+        Returns:
+            Dict: Either the original response if it's a dict or an error dict
+        """
+        if not isinstance(response, dict):
+            return {
+                "error": "Invalid response format",
+                "details": f"Expected dictionary, got {type(response).__name__}",
+                "raw_response": str(response),
+            }
+        return response
+
     async def account_info(
         self,
         account: str,
@@ -108,7 +126,7 @@ class NanoWalletRpc:
             include_confirmed=include_confirmed,
         )
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)
 
     async def blocks_info(
         self,
@@ -141,7 +159,7 @@ class NanoWalletRpc:
             for hash in hashes:
                 raise BlockNotFoundError(f"Block not found {hash}")
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)
 
     async def work_generate(
         self, block_hash: str, use_peers: bool = False
@@ -162,7 +180,7 @@ class NanoWalletRpc:
             "Work generated for hash: %s, %s", block_hash, response.get("work")
         )
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)
 
     async def process(self, block: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -177,7 +195,7 @@ class NanoWalletRpc:
         logger.debug("Processing block: %s", block)
         response = await self._rpc.process(block)
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)
 
     async def receivable(
         self,
@@ -204,7 +222,7 @@ class NanoWalletRpc:
             source=include_source,
         )
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)
 
     async def account_history(
         self,
@@ -234,4 +252,4 @@ class NanoWalletRpc:
             head=head,
         )
         try_raise_error(response)
-        return response
+        return self._ensure_dict_response(response)

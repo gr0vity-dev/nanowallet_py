@@ -1,6 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch, Mock
-
+from unittest.mock import patch, Mock
 
 from nanowallet.wallets import NanoWalletRpc
 from nanowallet.wallets import NanoWalletAuthenticated
@@ -55,7 +54,13 @@ def dummy_account_info():
 @pytest.fixture
 def mock_rpc_typed():
     """Fixture that provides a mocked NanoRpcTyped instance"""
-    mock = AsyncMock(spec=NanoRpcTyped)
+    mock = Mock(spec=NanoRpcTyped)
+    mock.account_info.return_value = {}  # Empty dict to supress warnings
+    mock.receivable.return_value = {}  # Empty dict to supress warnings
+    mock.blocks_info.return_value = {}  # Empty dict to supress warnings
+    mock.work_generate.return_value = {}  # Empty dict to supress warnings
+    mock.process.return_value = {}  # Empty dict to supress warnings
+    mock.account_history.return_value = {}  # Empty dict to supress warnings
     return mock
 
 
