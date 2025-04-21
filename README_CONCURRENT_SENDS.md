@@ -63,43 +63,6 @@ async def send_raw_with_retry(
     """
 ```
 
-## Usage Example
-
-```python
-import asyncio
-from decimal import Decimal
-from nanowallet import NanoWalletKey, NanoWalletRpc, WalletConfig
-
-async def main():
-    # Set up wallet
-    rpc = NanoWalletRpc(url="http://localhost:7076")
-    wallet = NanoWalletKey(rpc=rpc, private_key="YOUR_PRIVATE_KEY")
-    
-    # Create multiple concurrent sends (will retry automatically)
-    tasks = []
-    for i in range(5):
-        destination = f"nano_destination{i}"
-        task = wallet.send_with_retry(
-            destination_account=destination,
-            amount=Decimal("0.000001"),
-            max_retries=5,
-            retry_delay_base=0.15,
-            retry_delay_backoff=1.7
-        )
-        tasks.append(task)
-    
-    # Run all tasks and wait for completion
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # All successful sends will have their block hashes returned
-    for i, result in enumerate(results):
-        if result.success:
-            print(f"Send {i} succeeded with hash: {result.value}")
-        else:
-            print(f"Send {i} failed: {result.error}")
-
-asyncio.run(main())
-```
 
 ## Performance Considerations
 

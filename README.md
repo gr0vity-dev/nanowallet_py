@@ -128,7 +128,7 @@ if __name__ == "__main__":
 
 ## Documentation
 
-For full details on wallet types, methods, error handling, and configuration, see the [Full Documentation](docs/DOCUMENTATION.md). <!-- Adjust link if needed -->
+For full details on wallet types, methods, error handling, and configuration, see the [Full Documentation](DOCUMENTATION.md). <!-- Adjust link if needed -->
 
 ## License
 
