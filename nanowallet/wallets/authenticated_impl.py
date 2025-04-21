@@ -1089,6 +1089,7 @@ class NanoWalletAuthenticated(
             error_message=error_message,
         )
 
+    @reload_after
     @handle_errors
     async def refund_receivable_by_hash(
         self, receivable_hash: str, wait_confirmation: bool = False, timeout: int = 30
@@ -1105,8 +1106,7 @@ class NanoWalletAuthenticated(
             A RefundDetail object detailing the refund attempt.
         """
         logger.info("Starting refund_receivable_by_hash for block %s", receivable_hash)
-        # Reload state before performing operations relying on current balance/frontier
-        await super().reload()
+
         # Call the internal method that contains the core logic
         result_detail = await self._internal_refund_receivable(
             receivable_hash=receivable_hash,
