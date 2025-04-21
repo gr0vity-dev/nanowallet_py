@@ -16,7 +16,10 @@ class AccountHelper:
     def validate_account(account_id: str) -> bool:
         """Validate a Nano account ID"""
         try:
-            return validate_account_id(account_id)
+            if validate_account_id(account_id):
+                return True
+            else:
+                return False
         except Exception as e:
             raise InvalidAccountError(f"Invalid account ID: {account_id}") from e
 
@@ -54,6 +57,8 @@ class AccountHelper:
                 prefix=AccountIDPrefix.NANO,
             )
         except Exception as e:
+            public_key = public_key or ""
+            private_key = private_key or ""
             raise InvalidAccountError(
                 f"Invalid public key: {public_key} or private key: {private_key[:10]}..."
             ) from e
