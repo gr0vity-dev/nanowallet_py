@@ -7,7 +7,7 @@ from .wallets import (
     create_wallet_from_seed,
     create_wallet_from_private_key,
 )
-from .models import WalletConfig, WalletBalance, AccountInfo
+from .models import WalletConfig, WalletBalance, AccountInfo, RefundDetail
 from .utils import NanoResult
 from .errors import (
     RpcError,
@@ -39,6 +39,7 @@ __all__ = [
     "WalletConfig",
     "WalletBalance",
     "AccountInfo",
+    "RefundDetail",
     "NanoResult",
     # Errors
     "NanoException",

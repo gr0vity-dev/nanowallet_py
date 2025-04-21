@@ -1,6 +1,13 @@
 from typing import Protocol, Optional, List, Dict, Any
 from decimal import Decimal
-from ..models import WalletBalance, AccountInfo, Receivable, Transaction, ReceivedBlock
+from ..models import (
+    WalletBalance,
+    AccountInfo,
+    Receivable,
+    Transaction,
+    ReceivedBlock,
+    RefundDetail,
+)
 from ..utils import NanoResult
 
 
@@ -73,10 +80,19 @@ class IAuthenticatedWallet(IReadOnlyWallet, Protocol):
     ) -> NanoResult[ReceivedBlock]: ...
     async def receive_all(
         self,
-        threshold_raw: float = ...,
+        threshold_raw: int = ...,
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> NanoResult[List[ReceivedBlock]]: ...
     async def refund_first_sender(
         self, wait_confirmation: bool = False
     ) -> NanoResult[str]: ...
+    async def refund_receivable_by_hash(
+        self, receivable_hash: str, wait_confirmation: bool = False, timeout: int = 30
+    ) -> NanoResult[RefundDetail]: ...
+    async def refund_all_receivables(
+        self,
+        threshold_raw: int = ...,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> NanoResult[List[RefundDetail]]: ...

@@ -1,7 +1,7 @@
 # nanowallet/models.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 from .utils.conversion import _raw_to_nano
 from .libs.account_helper import AccountHelper
 
@@ -88,6 +88,32 @@ class AmountReceived:
     @property
     def amount(self) -> Decimal:
         """Convert raw amount to Nano"""
+        return _raw_to_nano(self.amount_raw)
+
+
+@dataclass
+class RefundStatus:
+    INITIATED = "INITIATED"
+    SKIPPED = "SKIPPED"
+    SUCCESS = "SUCCESS"
+    INFO_FAILED = "INFO_FAILED"
+    RECEIVE_FAILED = "RECEIVE_FAILED"
+    SEND_FAILED = "SEND_FAILED"
+    UNEXPECTED_ERROR = "UNEXPECTED_ERROR"
+
+
+@dataclass(frozen=True)
+class RefundDetail:
+    receivable_hash: str
+    amount_raw: int
+    status: RefundStatus
+    source_account: Optional[str] = None
+    receive_hash: Optional[str] = None
+    refund_hash: Optional[str] = None
+    error_message: Optional[str] = None
+
+    @property
+    def amount(self) -> Decimal:
         return _raw_to_nano(self.amount_raw)
 
 

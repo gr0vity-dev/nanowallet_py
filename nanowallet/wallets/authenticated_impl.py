@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 from decimal import Decimal
 
 from ..libs.account_helper import AccountHelper
@@ -12,6 +12,8 @@ from ..models import (
     Receivable,
     Transaction,
     ReceivedBlock,
+    RefundDetail,
+    RefundStatus,
 )
 from ..utils.conversion import raw_to_nano, nano_to_raw
 from ..utils.validation import validate_nano_amount
@@ -928,3 +930,240 @@ class NanoWalletAuthenticated(
             f"BalanceRaw={self._balance_info.balance_raw}, "
             f"ReceivableRaw={self._balance_info.receivable_raw}"
         )
+
+    async def _internal_refund_receivable(
+        self, receivable_hash: str, wait_confirmation: bool, timeout: int
+    ) -> RefundDetail:
+        """Internal logic to refund a single receivable block hash (simplified)."""
+        logger.debug(
+            "Simplified internal refund processing for receivable: %s", receivable_hash
+        )
+        receive_hash: Optional[str] = None
+        refund_hash: Optional[str] = None
+        source_account: Optional[str] = None
+        amount_raw: int = 0
+        status: RefundStatus = RefundStatus.INITIATED
+        error_message: Optional[str] = None
+        received_block: Optional[ReceivedBlock] = None  # Keep track if receive succeeds
+
+        try:
+            # Step 1: Receive the block. This internally handles getting block info first.
+            logger.debug("Attempting receive for refund: %s", receivable_hash)
+            receive_result = await self.receive_by_hash(
+                receivable_hash,
+                wait_confirmation=wait_confirmation,  # Pass confirmation flag
+                timeout=timeout,
+            )
+            # If receive_by_hash failed internally (e.g., block not found, RPC error), unwrap will raise
+            received_block = receive_result.unwrap()
+
+            # If receive succeeded:
+            receive_hash = received_block.block_hash
+            amount_raw = received_block.amount_raw
+            source_account = received_block.source  # Get sender from the result
+            if source_account == self.account:
+                logger.info(
+                    "Received block %s -> new block %s. Source: %s, Amount: %s raw",
+                    receivable_hash,
+                    receive_hash,
+                    source_account,
+                    amount_raw,
+                )
+                return RefundDetail(
+                    receivable_hash=receivable_hash,
+                    amount_raw=amount_raw,
+                    source_account=source_account,
+                    status=RefundStatus.SKIPPED,
+                    error_message="Refunding to self",
+                )
+
+            logger.info(
+                "Received block %s -> new block %s. Source: %s, Amount: %s raw",
+                receivable_hash,
+                receive_hash,
+                source_account,
+                amount_raw,
+            )
+
+            # Basic validation after receive (optional, but good practice)
+            if not source_account or not AccountHelper.validate_account(source_account):
+                raise InvalidAccountError(
+                    f"Invalid source account obtained after receive: {source_account}"
+                )
+            if amount_raw <= 0:
+                raise InvalidAmountError(
+                    f"Non-positive amount obtained after receive: {amount_raw}"
+                )
+
+            # Step 2: Send the refund using info from the received block
+            logger.debug(
+                "Attempting refund send to %s for %s raw", source_account, amount_raw
+            )
+            send_result = await self.send_raw(
+                destination_account=source_account,
+                amount_raw=amount_raw,
+                wait_confirmation=wait_confirmation,  # Pass confirmation flag
+                timeout=timeout,
+            )
+            # If send failed, unwrap will raise
+            refund_hash = send_result.unwrap()
+            status = RefundStatus.SUCCESS
+            logger.info(
+                "Successfully refunded %s raw to %s. Refund block hash: %s",
+                amount_raw,
+                source_account,
+                refund_hash,
+            )
+
+        except (
+            BlockNotFoundError,
+            InvalidAccountError,
+            InvalidAmountError,
+            InsufficientBalanceError,
+            RpcError,
+            TimeoutException,
+            NanoException,
+        ) as e:
+            # Determine status based on whether receive succeeded
+            if (
+                received_block is None
+            ):  # Failed during receive_by_hash or validation right after
+                status = RefundStatus.RECEIVE_FAILED
+                error_message = (
+                    f"Failed to receive block or invalid data retrieved: {e.message}"
+                )
+                logger.error("%s (receivable_hash: %s)", error_message, receivable_hash)
+                # Try to populate amount/source for the report if possible (best effort)
+                if (
+                    isinstance(e, (InvalidAccountError, InvalidAmountError))
+                    and source_account
+                ):
+                    # source_account might be set but invalid
+                    pass
+                elif status == RefundStatus.RECEIVE_FAILED and amount_raw == 0:
+                    # Attempt to get info directly if receive failed early
+                    try:
+                        logger.debug(
+                            "Attempting block info lookup after receive failure: %s",
+                            receivable_hash,
+                        )
+                        block_info = await self._block_info(receivable_hash)
+                        amount_raw = int(block_info.get("amount", 0))
+                        source_account = block_info.get("block_account")
+                    except Exception as info_e:
+                        logger.warning(
+                            "Could not retrieve block info after receive failure for %s: %s",
+                            receivable_hash,
+                            info_e,
+                        )
+            else:  # Failed during send_raw
+                status = RefundStatus.SEND_FAILED
+                error_message = f"Failed to send refund: {e.message}"
+                logger.error(
+                    "%s (dest: %s, amount: %s)",
+                    error_message,
+                    source_account,
+                    amount_raw,
+                )
+
+            # Add error code if available
+            if hasattr(e, "code") and e.code:
+                error_message = f"[{e.code}] {error_message}"
+
+        except Exception as e:
+            # Catch any other unexpected errors
+            status = RefundStatus.UNEXPECTED_ERROR
+            error_message = (
+                f"Unexpected error processing refund for {receivable_hash}: {e}"
+            )
+            logger.exception(error_message)  # Log with stack trace
+
+        # Return final detail for this receivable
+        return RefundDetail(
+            receivable_hash=receivable_hash,
+            amount_raw=amount_raw,  # Best effort
+            source_account=source_account,  # Best effort
+            status=status,
+            receive_hash=receive_hash,  # Populated if receive step succeeded
+            refund_hash=refund_hash,  # Populated if send step succeeded
+            error_message=error_message,
+        )
+
+    @handle_errors
+    async def refund_receivable_by_hash(
+        self, receivable_hash: str, wait_confirmation: bool = False, timeout: int = 30
+    ) -> RefundDetail:
+        """
+        Receives a specific pending block and immediately refunds the amount to the sender.
+
+        Args:
+            receivable_hash: The hash of the send block to receive and refund.
+            wait_confirmation: Whether to wait for network confirmation for receive and send blocks.
+            timeout: Timeout in seconds for waiting for confirmation.
+
+        Returns:
+            A RefundDetail object detailing the refund attempt.
+        """
+        logger.info("Starting refund_receivable_by_hash for block %s", receivable_hash)
+        # Reload state before performing operations relying on current balance/frontier
+        await super().reload()
+        # Call the internal method that contains the core logic
+        result_detail = await self._internal_refund_receivable(
+            receivable_hash=receivable_hash,
+            wait_confirmation=wait_confirmation,
+            timeout=timeout,
+        )
+        return result_detail
+
+    @handle_errors
+    async def refund_all_receivables(
+        self,
+        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> List[RefundDetail]:
+        """
+        Receives all pending blocks above a threshold and immediately refunds each amount to its sender.
+
+        Args:
+            threshold_raw: The minimum amount in raw units to be considered for refund.
+            wait_confirmation: Whether to wait for network confirmation for receive and send blocks.
+            timeout: Timeout in seconds for waiting for confirmation.
+
+        Returns:
+            A list of RefundDetail objects detailing each refund attempt.
+        """
+        logger.info(
+            "Starting refund_all_receivables (threshold=%s raw, wait_confirmation=%s)",
+            threshold_raw,
+            wait_confirmation,
+        )
+        # Reload state first to get current receivables
+
+        list_result = await self.list_receivables(threshold_raw=int(threshold_raw))
+        receivables = list_result.unwrap()  # Raises if list_receivables itself fails
+
+        if not receivables:
+            logger.info("No receivable blocks found matching criteria for refund.")
+            return []
+
+        logger.info("Found %s receivable blocks to attempt refund.", len(receivables))
+        refund_results: List[RefundDetail] = []
+
+        for receivable in receivables:
+            # Call the internal refund logic for each receivable hash
+            # Note: This processes refunds sequentially. Reloading state between each refund
+            # might be necessary if subsequent sends depend on the state change from the previous receive/send cycle.
+            detail = await self._internal_refund_receivable(
+                receivable_hash=receivable.block_hash,
+                wait_confirmation=wait_confirmation,
+                timeout=timeout,
+            )
+            refund_results.append(detail)
+            # Optional: Add a small delay between refunds if needed
+            # await asyncio.sleep(0.1)
+
+        logger.info(
+            "refund_all_receivables finished. Processed %s blocks.", len(receivables)
+        )
+        return refund_results
