@@ -155,8 +155,8 @@ class NanoWalletAuthenticated(
         Returns:
             True if balance or receivable balance is greater than zero
         """
-        if not self._account_info.account:
-            await self.reload()
+
+        await self.reload()
         return (self._balance_info.balance_raw > 0) or (
             self._balance_info.receivable_raw > 0
         )
@@ -169,8 +169,7 @@ class NanoWalletAuthenticated(
         Returns:
             WalletBalance object containing current and receivable balances
         """
-        if not self._account_info.account:
-            await self.reload()
+        await self.reload()
         return self._balance_info
 
     @handle_errors

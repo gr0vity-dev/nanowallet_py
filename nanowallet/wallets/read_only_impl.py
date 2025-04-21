@@ -116,8 +116,7 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         Returns:
             True if balance or receivable balance is greater than zero
         """
-        if not self._account_info.account:
-            await self.reload()
+        await self.reload()
         return (self._balance_info.balance_raw > 0) or (
             self._balance_info.receivable_raw > 0
         )
@@ -130,8 +129,7 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         Returns:
             WalletBalance object containing current and receivable balances
         """
-        if not self._account_info.account:
-            await self.reload()
+        await self.reload()
         return self._balance_info
 
     @handle_errors
@@ -142,8 +140,7 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         Returns:
             AccountInfo object containing account metadata
         """
-        if not self._account_info.account:
-            await self.reload()
+        await self.reload()
         return self._account_info
 
     @handle_errors
@@ -159,9 +156,8 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         Returns:
             List of Receivable objects containing block hashes and amounts
         """
-        if not self._account_info.account:
-            await self.reload()
 
+        await self.reload()
         # If receivable_blocks is empty, return an empty list
         if not self.receivable_blocks:
             return []
