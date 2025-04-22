@@ -32,7 +32,9 @@ def validate_nano_amount(amount: Union[str, Decimal, int]) -> Decimal:
         InvalidAmountError: If amount is invalid
     """
     if isinstance(amount, float):
-        raise InvalidAmountError("Float values are not allowed to avoid precision loss")
+        raise InvalidAmountError(
+            f"Float values [{amount}] are not allowed to avoid precision loss"
+        )
 
     try:
         amount_decimal = Decimal(str(amount))

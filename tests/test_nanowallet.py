@@ -402,6 +402,48 @@ async def test_send_raw(mock_block, mock_rpc, mock_rpc_typed, seed, index):
 
 
 @pytest.mark.asyncio
+@patch("nanowallet.wallets.mixins.NanoWalletBlock")
+async def test_send_raw_below_min_send_amount(
+    mock_block, mock_rpc, mock_rpc_typed, seed, index
+):
+
+    mock_rpc_typed.account_info.return_value = {
+        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
+        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
+        "balance": "2000000000000000000000000000000",
+        "representative_block": "representative_block",
+        "open_block": "open_block",
+        "confirmation_height": "1",
+        "block_count": "50",
+        "account_version": "1",
+        "weight": "3000000000000000000000000000000",
+        "receivable": "1000000000000000000000000000000",
+    }
+    mock_rpc_typed.work_generate.return_value = {"work": "work_value"}
+    mock_rpc_typed.process.return_value = {"hash": "processed_block_hash"}
+
+    wallet_config = WalletConfig(min_send_amount_raw=10**30)
+    wallet = create_wallet_from_seed(mock_rpc, seed, index, wallet_config)
+    result = await wallet.send_raw(
+        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s",
+        10**29,
+    )
+
+    assert result.success == False
+    assert result.value == None
+    mock_block.assert_not_called()
+    mock_rpc_typed.process.assert_not_called()
+
+    result = await wallet.send(
+        "nano_3pay1r1z3fs5t3qix93oyt97np76qcp41afa7nzet9cem1ea334eoasot38s", "0.99"
+    )
+    assert result.success == False
+    assert result.value == None
+    mock_block.assert_not_called()
+    mock_rpc_typed.process.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_raw_error(mock_rpc, mock_rpc_typed, seed, index):
 
     mock_rpc_typed.account_info.return_value = {
@@ -800,6 +842,7 @@ async def test_receive_all_nothing_found(mock_rpc, mock_rpc_typed, seed, index):
 
     wallet = create_wallet_from_seed(mock_rpc, seed, index)
     result = await wallet.receive_all()
+    print(result.unwrap())
 
     assert result.success == True
 

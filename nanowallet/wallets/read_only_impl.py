@@ -15,9 +15,6 @@ from .mixins import StateManagementMixin
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Constants
-DEFAULT_THRESHOLD_RAW = 10**24
-
 
 class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
     """Read-only implementation of NanoWallet using composition and mixins."""
@@ -145,28 +142,37 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
 
     @handle_errors
     async def list_receivables(
-        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
+        self, threshold_raw: Optional[int] = None
     ) -> List[Receivable]:
         """
         List receivable blocks sorted by descending amount.
 
         Args:
-            threshold_raw: Minimum amount to consider (in raw)
+            threshold_raw: Minimum amount to consider (in raw). If None, uses config.min_receive_threshold_raw.
 
         Returns:
             List of Receivable objects containing block hashes and amounts
         """
-
         await self.reload()
         # If receivable_blocks is empty, return an empty list
         if not self.receivable_blocks:
             return []
 
+        # Determine the threshold to use
+        effective_threshold = (
+            threshold_raw
+            if threshold_raw is not None
+            else self.config.min_receive_threshold_raw
+        )
+        logger.debug(
+            "Listing receivables with effective threshold: %d raw", effective_threshold
+        )
+
         # Convert blocks to Receivable objects and filter by threshold
         receivables = [
             Receivable(block_hash=block, amount_raw=int(amount))
             for block, amount in self.receivable_blocks.items()
-            if int(amount) >= threshold_raw
+            if int(amount) >= effective_threshold
         ]
 
         # Sort by descending amount

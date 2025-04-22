@@ -37,7 +37,6 @@ from .mixins import StateManagementMixin, BlockOperationsMixin
 logger = logging.getLogger(__name__)
 
 # Constants
-DEFAULT_THRESHOLD_RAW = 10**24
 RETRYABLE_ERROR_MESSAGES = [
     "Fork",  # Explicit fork detected by the node
     "gap previous",  # The 'previous' block specified isn't the frontier
@@ -186,32 +185,37 @@ class NanoWalletAuthenticated(
 
     @handle_errors
     async def list_receivables(
-        self, threshold_raw: int = DEFAULT_THRESHOLD_RAW
+        self, threshold_raw: Optional[int] = None
     ) -> List[Receivable]:
         """
         List receivable blocks sorted by descending amount.
 
         Args:
-            threshold_raw: Minimum amount to consider (in raw)
+            threshold_raw: Minimum amount to consider (in raw). If None, uses config.min_receive_threshold_raw.
 
         Returns:
             List of Receivable objects containing block hashes and amounts
         """
-        # if not self._account_info.account:
         await self.reload()
-
-        # If receivable_blocks is empty, return an empty list
         if not self.receivable_blocks:
             return []
 
-        # Convert blocks to Receivable objects and filter by threshold
+        # Determine the threshold to use
+        effective_threshold = (
+            threshold_raw
+            if threshold_raw is not None
+            else self.config.min_receive_threshold_raw
+        )
+        logger.debug(
+            "Listing receivables with effective threshold: %d raw", effective_threshold
+        )
+
         receivables = [
             Receivable(block_hash=block, amount_raw=int(amount))
             for block, amount in self.receivable_blocks.items()
-            if int(amount) >= threshold_raw
+            # Use effective_threshold here
+            if int(amount) >= effective_threshold
         ]
-
-        # Sort by descending amount
         return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
 
     #
@@ -240,6 +244,7 @@ class NanoWalletAuthenticated(
         Raises:
             InvalidAccountError: If destination account is invalid
             InsufficientBalanceError: If account has insufficient balance
+            InvalidAmountError: If amount is not positive or below minimum required
             RpcError: If node returns error during processing
             TimeoutException: If confirmation times out
         """
@@ -248,6 +253,25 @@ class NanoWalletAuthenticated(
             amount_raw,
             destination_account,
         )
+
+        # Guard clause: Ensure amount is positive
+        if amount_raw <= 0:
+            raise InvalidAmountError("Send amount must be positive.")
+
+        # Guard clause: Check against minimum send amount configured
+        if amount_raw < self.config.min_send_amount_raw:
+            min_req = self.config.min_send_amount_raw
+            # Attempt to provide clearer error message with Nano conversion
+
+            min_nano = raw_to_nano(min_req)
+            sent_nano = raw_to_nano(amount_raw)
+            msg = (
+                f"Send amount {sent_nano} Nano ({amount_raw} raw) is below the minimum configured amount "
+                f"{min_nano} Nano ({min_req} raw)."
+                f"Please configure the min_send_amount_raw in your WalletConfig."
+            )
+
+            raise InvalidAmountError(msg)
 
         # Validate destination
         if not destination_account:
@@ -654,7 +678,7 @@ class NanoWalletAuthenticated(
     @handle_errors
     async def receive_all(
         self,
-        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+        threshold_raw: Optional[int] = None,
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> List[ReceivedBlock]:
@@ -669,17 +693,21 @@ class NanoWalletAuthenticated(
         Returns:
             List of ReceivedBlock objects with details of all received blocks
         """
+        # Determine threshold description for logging
+        threshold_desc = (
+            f"{threshold_raw} raw"
+            if threshold_raw is not None
+            else f"config default ({self.config.min_receive_threshold_raw} raw)"
+        )
         logger.info(
-            "Starting receive_all (threshold=%s raw, wait_confirmation=%s)",
-            threshold_raw,
+            "Starting receive_all (threshold=%s, wait_confirmation=%s)",
+            threshold_desc,
             wait_confirmation,
         )
 
-        # Get the list of receivable blocks
-        receivables_result = await self.list_receivables(
-            threshold_raw=int(threshold_raw)
-        )
-        receivables = receivables_result.unwrap()  # Explicitly unwrap the result
+        # Pass threshold_raw (which might be None) to list_receivables
+        receivables_result = await self.list_receivables(threshold_raw=threshold_raw)
+        receivables = receivables_result.unwrap()
 
         if not receivables:
             logger.info("No receivable blocks found matching criteria.")
@@ -733,58 +761,55 @@ class NanoWalletAuthenticated(
         self,
         destination_account: str,
         sweep_pending: bool = True,
-        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+        threshold_raw: Optional[int] = None,
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> str:
         """
-        Send all funds to destination account.
+        Receive all pending funds and send all balance to destination account.
 
         Args:
-            destination_account: Destination account address
-            sweep_pending: Whether to first receive all pending blocks
-            threshold_raw: Minimum amount to receive for pending blocks
-            wait_confirmation: Whether to wait for block confirmations
-            timeout: Maximum time to wait for each block confirmation
+            destination_account: Account to send funds to
+            sweep_pending: Whether to receive pending blocks first
+            threshold_raw: Minimum amount to consider for receiving (in raw). If None, uses config.min_receive_threshold_raw.
+            wait_confirmation: Whether to wait for block confirmation
+            timeout: Maximum time to wait for confirmation
 
         Returns:
-            Hash of the final send block
+            Hash of the send block
         """
+        # Determine threshold description for logging
+        threshold_desc = (
+            f"{threshold_raw} raw"
+            if threshold_raw is not None
+            else f"config default ({self.config.min_receive_threshold_raw} raw)"
+        )
         logger.info(
-            "Starting sweep to %s (sweep_pending=%s, threshold=%d)",
+            "Starting sweep to %s (sweep_pending=%s, threshold=%s)",
             destination_account,
             sweep_pending,
-            threshold_raw,
+            threshold_desc,
         )
 
-        # Validate destination
         if not AccountHelper.validate_account(destination_account):
             raise InvalidAccountError("Invalid destination account for sweep")
 
-        # First receive all pending blocks if requested
         if sweep_pending:
             logger.info("Sweep: Attempting to receive pending blocks first.")
-
             try:
-                receive_result = await self.receive_all(
+                # Pass threshold_raw (which might be None) to receive_all
+                await self.receive_all(
                     threshold_raw=threshold_raw,
-                    wait_confirmation=False,  # Don't wait for confirmations now
+                    wait_confirmation=False,
                     timeout=timeout,
                 )
-                # No need to explicitly unwrap here as we just need to know it succeeded
                 logger.info(
                     "Sweep: Pending blocks received successfully (or none to receive)."
                 )
-
-                # Reload state to get updated balance
-                await super().reload()
-
+                await super().reload()  # Reload state after potentially receiving blocks
             except Exception as e:
-                logger.error("Sweep failed: Error during receive_all: %s", str(e))
-                raise NanoException(
-                    f"Sweep failed during receive_all: {e}",
-                    getattr(e, "code", "SWEEP_RECEIVE_ERROR"),
-                ) from e
+                logger.warning("Sweep: Error receiving some pending blocks: %s", str(e))
+                # Continue with sweeping the existing balance
 
         # Get current balance
         current_balance_raw = self._balance_info.balance_raw
@@ -1117,7 +1142,7 @@ class NanoWalletAuthenticated(
     @handle_errors
     async def refund_all_receivables(
         self,
-        threshold_raw: int = DEFAULT_THRESHOLD_RAW,
+        threshold_raw: Optional[int] = None,
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> List[RefundDetail]:
@@ -1130,17 +1155,23 @@ class NanoWalletAuthenticated(
             timeout: Timeout in seconds for waiting for confirmation.
 
         Returns:
-            A list of RefundDetail objects detailing each refund attempt.
+            List of refund details with status
         """
+        # Determine threshold description for logging
+        threshold_desc = (
+            f"{threshold_raw} raw"
+            if threshold_raw is not None
+            else f"config default ({self.config.min_receive_threshold_raw} raw)"
+        )
         logger.info(
-            "Starting refund_all_receivables (threshold=%s raw, wait_confirmation=%s)",
-            threshold_raw,
+            "Starting refund_all_receivables (threshold=%s, wait_confirmation=%s)",
+            threshold_desc,
             wait_confirmation,
         )
-        # Reload state first to get current receivables
 
-        list_result = await self.list_receivables(threshold_raw=int(threshold_raw))
-        receivables = list_result.unwrap()  # Raises if list_receivables itself fails
+        # Pass threshold_raw (which might be None) to list_receivables
+        list_result = await self.list_receivables(threshold_raw=threshold_raw)
+        receivables = list_result.unwrap()
 
         if not receivables:
             logger.info("No receivable blocks found matching criteria for refund.")

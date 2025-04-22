@@ -6,7 +6,6 @@ from decimal import Decimal
 # Import necessary classes from implementation and models
 from nanowallet.wallets.authenticated_impl import (
     NanoWalletAuthenticated,
-    DEFAULT_THRESHOLD_RAW,
 )
 from nanowallet.libs.rpc import INanoRpc
 from nanowallet.models import (
@@ -472,9 +471,7 @@ class TestRefundReceivables:
             mock_internal.side_effect = mock_internal_details
 
             # Act
-            result = await wallet.refund_all_receivables(
-                threshold_raw=DEFAULT_THRESHOLD_RAW
-            )
+            result = await wallet.refund_all_receivables(threshold_raw=10**24)
 
             # Assert
             assert result.success is True
@@ -483,9 +480,7 @@ class TestRefundReceivables:
             assert details == mock_internal_details
 
             # Check calls
-            wallet.list_receivables.assert_called_once_with(
-                threshold_raw=DEFAULT_THRESHOLD_RAW
-            )
+            wallet.list_receivables.assert_called_once_with(threshold_raw=10**24)
             # wallet.reload was NOT called based on implementation diff for refund_all_receivables
             wallet.reload.assert_not_called()
             assert mock_internal.call_count == 2
@@ -522,9 +517,7 @@ class TestRefundReceivables:
             assert result.success is True
             details = result.unwrap()
             assert len(details) == 0
-            wallet.list_receivables.assert_called_once_with(
-                threshold_raw=DEFAULT_THRESHOLD_RAW
-            )
+            wallet.list_receivables.assert_called_once_with(threshold_raw=None)
             wallet.reload.assert_not_called()  # Not called by refund_all_receivables
             mock_internal.assert_not_called()
 
@@ -640,9 +633,7 @@ class TestRefundReceivables:
             assert details[1].receivable_hash == self.RECEIVABLE_HASH_2
             assert details[1].error_message == "Send failed"
 
-            wallet.list_receivables.assert_called_once_with(
-                threshold_raw=DEFAULT_THRESHOLD_RAW
-            )
+            wallet.list_receivables.assert_called_once_with(threshold_raw=None)
             wallet.reload.assert_not_called()  # Not called by refund_all_receivables
             assert mock_internal.call_count == 2
             mock_internal.assert_has_calls(
@@ -718,9 +709,7 @@ class TestRefundReceivables:
             assert details[1].receivable_hash == self_receivable_hash
             assert details[1].source_account == valid_account
 
-            wallet.list_receivables.assert_called_once_with(
-                threshold_raw=DEFAULT_THRESHOLD_RAW
-            )
+            wallet.list_receivables.assert_called_once_with(threshold_raw=None)
             wallet.reload.assert_not_called()  # Not called by refund_all_receivables
             assert mock_internal.call_count == 2
             mock_internal.assert_has_calls(

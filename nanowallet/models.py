@@ -14,6 +14,10 @@ class WalletConfig:
     default_representative: str = (
         "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
     )
+    # Minimum amount in raw units required for *send* operations (default: 10**24 raw = 1 microNano)
+    min_send_amount_raw: int = 10**24
+    # Default minimum threshold in raw units for *listing/processing receivables* (default: 10**24 raw = 1 microNano)
+    min_receive_threshold_raw: int = 10**24
 
 
 @dataclass
