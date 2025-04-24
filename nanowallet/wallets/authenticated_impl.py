@@ -913,48 +913,6 @@ class NanoWalletAuthenticated(
         logger.info("Refund successful. Block hash: %s", refund_hash)
         return refund_hash
 
-    def to_string(self) -> str:
-        """
-        Generate a human-readable representation of the wallet state.
-
-        Returns:
-            Detailed string representation of the wallet
-        """
-        balance_nano = raw_to_nano(self._balance_info.balance_raw)
-        receivable_nano = raw_to_nano(self._balance_info.receivable_raw)
-        weight_nano = (
-            raw_to_nano(self._account_info.weight_raw) if self._account_info else "N/A"
-        )
-        rep = self._account_info.representative if self._account_info else "N/A"
-        conf_height = (
-            self._account_info.confirmation_height if self._account_info else "N/A"
-        )
-        block_count = self._account_info.block_count if self._account_info else "N/A"
-
-        return (
-            f"NanoWalletAuthenticated:\n"
-            f"  Account: {self.account}\n"
-            f"  Balance: {balance_nano} Nano ({self._balance_info.balance_raw} raw)\n"
-            f"  Receivable: {receivable_nano} Nano ({self._balance_info.receivable_raw} raw)\n"
-            f"  Voting Weight: {weight_nano} Nano ({getattr(self._account_info, 'weight_raw', 'N/A')} raw)\n"
-            f"  Representative: {rep}\n"
-            f"  Confirmation Height: {conf_height}\n"
-            f"  Block Count: {block_count}"
-        )
-
-    def __str__(self) -> str:
-        """
-        Generate a simplified string representation of the wallet.
-
-        Returns:
-            Simple string representation of the wallet
-        """
-        return (
-            f"NanoWalletAuthenticated: Account={self.account}, "
-            f"BalanceRaw={self._balance_info.balance_raw}, "
-            f"ReceivableRaw={self._balance_info.receivable_raw}"
-        )
-
     async def _internal_refund_receivable(
         self, receivable_hash: str, wait_confirmation: bool, timeout: int
     ) -> RefundDetail:
@@ -1197,3 +1155,45 @@ class NanoWalletAuthenticated(
             "refund_all_receivables finished. Processed %s blocks.", len(receivables)
         )
         return refund_results
+
+    def to_string(self) -> str:
+        """
+        Generate a human-readable representation of the wallet state.
+
+        Returns:
+            Detailed string representation of the wallet
+        """
+        balance_nano = raw_to_nano(self._balance_info.balance_raw)
+        receivable_nano = raw_to_nano(self._balance_info.receivable_raw)
+        weight_nano = (
+            raw_to_nano(self._account_info.weight_raw) if self._account_info else "N/A"
+        )
+        rep = self._account_info.representative if self._account_info else "N/A"
+        conf_height = (
+            self._account_info.confirmation_height if self._account_info else "N/A"
+        )
+        block_count = self._account_info.block_count if self._account_info else "N/A"
+
+        return (
+            f"NanoWalletAuthenticated:\n"
+            f"  Account: {self.account}\n"
+            f"  Balance: {balance_nano} Nano ({self._balance_info.balance_raw} raw)\n"
+            f"  Receivable: {receivable_nano} Nano ({self._balance_info.receivable_raw} raw)\n"
+            f"  Voting Weight: {weight_nano} Nano ({getattr(self._account_info, 'weight_raw', 'N/A')} raw)\n"
+            f"  Representative: {rep}\n"
+            f"  Confirmation Height: {conf_height}\n"
+            f"  Block Count: {block_count}"
+        )
+
+    def __str__(self) -> str:
+        """
+        Generate a simplified string representation of the wallet.
+
+        Returns:
+            Simple string representation of the wallet
+        """
+        return (
+            f"NanoWalletAuthenticated: Account={self.account}, "
+            f"BalanceRaw={self._balance_info.balance_raw}, "
+            f"ReceivableRaw={self._balance_info.receivable_raw}"
+        )

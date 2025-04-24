@@ -27,6 +27,7 @@ This document provides comprehensive details for the `nanowallet` Python library
 7.  [Examples](#examples)
     *   [Receiving All Pending Blocks](#receiving-all-pending-blocks)
     *   [Sending with Retry Logic](#sending-with-retry-logic)
+    *   [Refunding Incoming Transactions](#refunding-incoming-transactions)
 8.  [Best Practices](#best-practices)
 9.  [License](#license)
 
@@ -297,6 +298,8 @@ except NanoException as e:
 | `receive_all()`         |           -           |                   X                   | Receive all pending blocks above threshold, returns `List[ReceivedBlock]` |
 | `sweep()`               |           -           |                   X                   | Send *entire* confirmed balance                              |
 | `refund_first_sender()` |           -           |                   X                   | Sweep funds back to the account opener/first sender          |
+| `refund_receivable_by_hash()` |           -           |                   X                   | Receive a specific pending block and refund to its sender    |
+| `refund_all_receivables()` |           -           |                   X                   | Receive all pending blocks and refund each to its sender      |
 
 *Legend: X = Available, - = Not Available*
 
@@ -370,6 +373,16 @@ async def sweep(
 
 async def refund_first_sender(self, wait_confirmation: bool = False) -> str:
     """Sweeps all funds back to the account that sent the first transaction (open block source or first receivable)."""
+
+async def refund_receivable_by_hash(
+    self, receivable_hash: str, wait_confirmation: bool = False, timeout: int = 30
+) -> RefundDetail: # Returns details of the refund attempt
+    """Receives a specific pending block and immediately refunds the amount to the sender."""
+
+async def refund_all_receivables(
+    self, threshold_raw: Optional[int] = None, wait_confirmation: bool = False, timeout: int = 30
+) -> List[RefundDetail]: # Returns list of refund details with status for each block
+    """Receives all pending blocks above a threshold and immediately refunds each amount to its sender."""
 ```
 
 ## 6. Data Models
@@ -439,6 +452,25 @@ class Transaction:
 class AmountReceived: # Often returned by utility functions like sum_received_amount
     amount_raw: int
     # Property: amount: Decimal
+
+@dataclass(frozen=True)
+class RefundDetail:
+    receivable_hash: str  # Hash of the incoming send block
+    amount_raw: int       # Amount being refunded
+    source_account: Optional[str]  # Sender account address
+    status: RefundStatus  # Status of the refund operation
+    receive_hash: Optional[str] = None  # Hash of receive block (if successful)
+    refund_hash: Optional[str] = None   # Hash of refund send block (if successful)
+    error_message: Optional[str] = None # Error details if unsuccessful
+    # Property: amount: Decimal
+
+class RefundStatus(Enum):
+    INITIATED = "initiated"       # Refund process started
+    SUCCESS = "success"           # Fully successful refund
+    SKIPPED = "skipped"           # Skipped (usually self-send)
+    RECEIVE_FAILED = "receive_failed"  # Failed during receive step
+    SEND_FAILED = "send_failed"   # Failed during send/refund step
+    UNEXPECTED_ERROR = "unexpected_error"  # Unhandled error
 ```
 
 ### Property Type Conversions
@@ -524,6 +556,75 @@ async def reliable_send():
         print(f"An unexpected error occurred: {e}")
 
 # asyncio.run(reliable_send())
+```
+
+### Refunding Incoming Transactions
+
+```python
+from nanowallet import NanoException # Assuming wallet is initialized
+
+async def refund_incoming_transactions():
+    print("Starting refund operation for incoming transactions...")
+    try:
+        # First, check pending blocks
+        await wallet.reload()
+        pending_result = await wallet.list_receivables()
+        
+        if not pending_result:
+            print("No pending blocks to refund.")
+            return
+            
+        pending_blocks = pending_result.unwrap()
+        print(f"Found {len(pending_blocks)} pending blocks to process.")
+        
+        # Option 1: Refund a specific block
+        if pending_blocks:
+            specific_hash = pending_blocks[0].block_hash
+            print(f"Refunding specific block: {specific_hash[:10]}...")
+            
+            refund_detail = (await wallet.refund_receivable_by_hash(
+                receivable_hash=specific_hash,
+                wait_confirmation=True,
+                timeout=60
+            )).unwrap()
+            
+            if refund_detail.status == "success":
+                print(f"Successfully refunded {refund_detail.amount} NANO to {refund_detail.source_account[:12]}...")
+                print(f"Receive hash: {refund_detail.receive_hash[:10]}...")
+                print(f"Refund hash: {refund_detail.refund_hash[:10]}...")
+            else:
+                print(f"Refund failed with status: {refund_detail.status}")
+                print(f"Error: {refund_detail.error_message}")
+        
+        # Option 2: Refund all pending blocks
+        print("Refunding all pending transactions...")
+        refund_results = (await wallet.refund_all_receivables(
+            threshold_raw=None,  # Use default threshold from config
+            wait_confirmation=False,
+            timeout=30
+        )).unwrap()
+        
+        # Print summary statistics
+        successful = sum(1 for r in refund_results if r.status == "success")
+        skipped = sum(1 for r in refund_results if r.status == "skipped")
+        failed = len(refund_results) - successful - skipped
+        
+        print(f"Refund summary: {successful} successful, {skipped} skipped, {failed} failed")
+        
+        # Print details for failed refunds
+        if failed > 0:
+            print("\nFailed refunds:")
+            for result in refund_results:
+                if result.status not in ("success", "skipped"):
+                    print(f"- Block {result.receivable_hash[:10]}...: {result.status}")
+                    print(f"  Error: {result.error_message}")
+
+    except NanoException as e:
+        print(f"Error during refund operation: {e.message} ({e.code})")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+# asyncio.run(refund_incoming_transactions())
 ```
 
 ## 8. Best Practices
