@@ -24,8 +24,6 @@ Designed with type safety and robust error handling in mind.
 
 ```bash
 pip install nanowallet
-# Or if you install from source/git:
-# pip install .
 ```
 *Requires Python 3.8+*
 
@@ -33,102 +31,61 @@ pip install nanowallet
 
 ```python
 import asyncio
-from decimal import Decimal
-from nanowallet import (
-    create_wallet_from_seed, # Use factory functions
-    NanoWalletRpc,
-    NanoException,
-    WalletConfig
-)
-import os
+from nanowallet import create_wallet_from_seed, NanoWalletRpc, WalletConfig
+from nanowallet.utils import sum_received_amount
 
 async def main():
-    # --- Configuration ---
-    # Ensure NANO_NODE_URL and NANO_WALLET_SEED are set as environment variables
-    # DO NOT HARDCODE YOUR SEED!
-    node_url = os.environ.get("NANO_NODE_URL", "http://localhost:7076") # Default to local node
-    wallet_seed = os.environ.get("NANO_WALLET_SEED")
-
-    if not wallet_seed:
-        print("Error: NANO_WALLET_SEED environment variable not set.")
-        # For this example, we'll use a placeholder (DO NOT USE FOR REAL FUNDS)
-        wallet_seed = "0000000000000000000000000000000000000000000000000000000000000001"
-        print(f"Warning: Using placeholder seed: {wallet_seed[:4]}...{wallet_seed[-4:]}")
-
-    # --- Initialization ---
-    rpc = NanoWalletRpc(url=node_url)
-    # Optional: Configure representative, work peers
-    # config = WalletConfig(default_representative="nano_your_rep_here...")
-    try:
-        # Use create_wallet_from_seed for seed-based wallets
-        wallet = create_wallet_from_seed(
-            rpc=rpc,
-            seed=wallet_seed,
-            index=0 # First account from seed
-            # config=config # Optional config
-        )
-    except NanoException as e:
-        print(f"Failed to create wallet: {e.message} ({e.code})")
-        return
-
-    print(f"Initialized Wallet for Account: {wallet.account}")
-
-    # --- Check Balance ---
-    print("\nChecking balance...")
-    # All wallet methods return NanoResult
-    balance_result = await wallet.balance_info()
-    if balance_result.success:
-        # Access value directly or use unwrap()
-        balance_info = balance_result.value
-        print(f"Current Balance: {balance_info.balance} NANO")
-        print(f"Receivable Balance: {balance_info.receivable} NANO")
+    # Connect to a Nano node
+    rpc = NanoWalletRpc(url="http://localhost:7076")
+    wallet_config = WalletConfig(use_work_peers=False)  # Optional configuration
+    
+    # Create wallet from seed and index
+    # ------------------------------------------------------------
+    wallet = create_wallet_from_seed(
+        rpc=rpc,
+        seed="0000000000000000000000000000000000000000000000000000000000000000",
+        index=0,
+        config=wallet_config,
+    )
+    
+    # Check balance
+    # ------------------------------------------------------------
+    response = await wallet.balance_info()
+    balance_info = response.unwrap()  # Option 1 - .unwrap() to handle the response
+    print(f"Balance: {balance_info.balance} NANO")
+    print(f"Receivable Balance: {balance_info.receivable} NANO")
+    
+    # Receive all pending transactions
+    # ------------------------------------------------------------
+    result = await wallet.receive_all()
+    if result.success:  # Option 2 - check success
+        received_amount = sum_received_amount(result.value)
+        print(f"Received {len(result.value)} blocks!")
+        print(f"Received amount: {received_amount.amount} NANO")
     else:
-        print(f"Error checking balance: {balance_result.error} ({balance_result.error_code})")
-
-    # --- Receive Pending Blocks (Example using unwrap()) ---
-    print("\nAttempting to receive pending blocks...")
+        print(f"Error receiving blocks: {result.error}")
+    
+    # Send entire balance to another account
+    # ------------------------------------------------------------
+    destination = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6"
+    send_result = await wallet.sweep(
+        destination, sweep_pending=True
+    )  # Sweeps pending/receivable balance + confirmed balance
+    
     try:
-        # Use unwrap() for concise success handling, relies on exception for errors
-        # Set wait_confirmation based on your needs
-        received_blocks = (await wallet.receive_all(wait_confirmation=False)).unwrap()
-        if received_blocks:
-             total_received = sum(block.amount for block in received_blocks)
-             print(f"Successfully received {total_received} NANO across {len(received_blocks)} blocks.")
-             # Check balance again (will reflect received amounts due to internal reload)
-             balance_info = (await wallet.balance_info()).unwrap() # Use unwrap if you expect success now
-             print(f"New Balance: {balance_info.balance} NANO")
-        else:
-            print("No pending blocks found to receive.")
+        send_hash = send_result.unwrap()
+        print(f"Sent! Block hash: {send_hash}")
+    except Exception as e:
+        print(f"Error sending: {e}")
 
-    except NanoException as e:
-        print(f"Failed to receive blocks: {e.message} ({e.code})")
-
-    # --- Send Transaction (Example using success check) ---
-    print("\nAttempting to send 0.001 NANO...")
-    destination = "nano_3msc38fyn67pgio16dj586pdrceahtn75qgnx7fy19wscixrc8dbb3abhbw6" # Example destination
-    amount_to_send = Decimal("0.001")
-
-    send_result = await wallet.send(destination_account=destination, amount=amount_to_send)
-
-    if send_result.success:
-        print(f"Successfully sent {amount_to_send} NANO.")
-        print(f"Send Block Hash: {send_result.value}")
-        # Check balance again
-        balance_info = (await wallet.balance_info()).unwrap() # Assume success
-        print(f"New Balance after send: {balance_info.balance} NANO")
-    else:
-        print(f"Error sending NANO: {send_result.error} ({send_result.error_code})")
-        if send_result.error_code == 'INSUFFICIENT_BALANCE':
-            print("You might need to fund the account first.")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
+
+That's it! The library handles all the complexity of work generation, block signing, and state management for you.
 
 ## Documentation
 
-For full details on wallet types, methods, error handling, and configuration, see the [Full Documentation](DOCUMENTATION.md). <!-- Adjust link if needed -->
+For full details on wallet types, methods, error handling, and configuration, see the [Full Documentation](DOCUMENTATION.md).
 
 ## License
 
