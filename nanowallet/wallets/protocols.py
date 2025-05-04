@@ -15,6 +15,9 @@ class IReadOnlyWallet(Protocol):
     """Protocol defining the interface for read-only wallet operations."""
 
     account: str
+    _balance_info: WalletBalance
+    _account_info: AccountInfo
+    _receivable_blocks: List[Receivable]
 
     async def reload(self) -> NanoResult[None]: ...
     async def balance_info(self) -> NanoResult[WalletBalance]: ...

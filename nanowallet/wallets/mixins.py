@@ -1,7 +1,7 @@
 import asyncio
 import time
 import logging
-from typing import Optional, Dict, Any, TypeVar
+from typing import Optional, Dict, Any, TypeVar, Tuple
 
 from ..libs.rpc import INanoRpc
 from ..libs.block import NanoWalletBlock
@@ -15,6 +15,9 @@ from ..errors import (
     NanoException,
 )
 from ..utils.decorators import handle_errors
+from ..utils.state_utils import StateUtils
+from ..utils.decorators import NanoResult
+from nanowallet.wallets.protocols import IReadOnlyWallet
 
 logger = logging.getLogger(__name__)
 ZERO_HASH = "0" * 64
@@ -75,136 +78,31 @@ class RpcInteractionMixin:
         return response["blocks"][block_hash]
 
 
-class StateManagementMixin(RpcInteractionMixin):
-    """Manages wallet state like balance, account info, and receivables."""
+class StateManagerMixin:
+    @staticmethod
+    async def reload_and_update(
+        account: str, rpc: INanoRpc
+    ) -> Tuple[WalletBalance, AccountInfo, Dict[str, str]]:
+        """Reloads state and updates the wallet object directly."""
+        if not account:
+            return None
 
-    config: WalletConfig
-    _balance_info: WalletBalance
-    _account_info: AccountInfo
-    receivable_blocks: Dict[str, str]
+        logger.debug("Reloading state for %s", account)
 
-    def _init_account_state(self) -> None:
-        """Initialize the wallet state with default values."""
-        account = getattr(self, "account", None)
-        self._balance_info = WalletBalance()
-        self._account_info = AccountInfo(account=account)
-        self.receivable_blocks = {}
-
-    @handle_errors
-    async def reload(self) -> None:
-        """Reload wallet state from the network."""
-        if not self.account:
-            logger.warning("Attempted to reload wallet state without an account set")
-            self._init_account_state()
-            return
-
-        logger.debug("Reloading state for account %s", self.account)
-
-        # Fetch receivables
         try:
-            receivable_response = await self.rpc.receivable(self.account, threshold=1)
-            if account_not_found(receivable_response):
-                self.receivable_blocks = {}
-            elif no_error(receivable_response):
-                self.receivable_blocks = receivable_response.get("blocks", {})
-            else:
-                logger.error(
-                    "Error fetching receivables: %s", receivable_response.get("error")
-                )
-                try_raise_error(receivable_response)
-                self.receivable_blocks = {}  # Fallback
-        except Exception as e:
-            logger.exception("Exception fetching receivables for %s", self.account)
-            self.receivable_blocks = {}
-            if isinstance(e, NanoException):
-                raise
-            raise NanoException(
-                f"Failed to fetch receivables: {e}", "RELOAD_ERROR"
-            ) from e
+            # Fetch state using StateUtils
+            balance, account_info, receivables = await StateUtils.reload_state(
+                rpc=rpc, account=account
+            )
+            logger.debug("State updated for %s", account)
 
-        # Fetch account info
-        try:
-            account_info_response = await self._fetch_account_info()
-
-            if account_not_found(account_info_response):
-                # Account exists only if it has receivables
-                if self.receivable_blocks:
-                    logger.debug(
-                        "Account %s not found but has receivables", self.account
-                    )
-                    receivable_sum = sum(
-                        int(amount) for amount in self.receivable_blocks.values()
-                    )
-                    self._balance_info = WalletBalance(
-                        balance_raw=0, receivable_raw=receivable_sum
-                    )
-                    self._account_info = AccountInfo(account=self.account)
-                else:
-                    # Account genuinely doesn't exist
-                    logger.debug(
-                        "Account %s not found and no receivables", self.account
-                    )
-                    self._init_account_state()
-            elif no_error(account_info_response):
-                # Account found, update state
-                logger.debug("Account info found for %s", self.account)
-
-                # Safely extract and convert values with proper error handling
-                try:
-                    balance_value = account_info_response.get("balance", "0")
-                    receivable_value = account_info_response.get("receivable", "0")
-                    confirmation_height = account_info_response.get(
-                        "confirmation_height", "0"
-                    )
-                    block_count = account_info_response.get("block_count", "0")
-                    weight = account_info_response.get("weight", "0")
-
-                    self._balance_info = WalletBalance(
-                        balance_raw=int(balance_value),
-                        receivable_raw=int(receivable_value),
-                    )
-
-                    self._account_info = AccountInfo(
-                        account=self.account,
-                        frontier_block=account_info_response.get("frontier"),
-                        representative=account_info_response.get("representative"),
-                        representative_block=account_info_response.get(
-                            "representative_block"
-                        ),
-                        open_block=account_info_response.get("open_block"),
-                        confirmation_height=int(confirmation_height),
-                        block_count=int(block_count),
-                        weight_raw=int(weight),
-                    )
-                except (ValueError, TypeError) as e:
-                    logger.error("Error parsing account info values: %s", str(e))
-                    # Fall back to defaults if conversion fails
-                    self._balance_info = WalletBalance(balance_raw=0, receivable_raw=0)
-                    self._account_info = AccountInfo(account=self.account)
-            else:
-                # Handle specific errors
-                logger.error(
-                    "Error fetching account info: %s",
-                    account_info_response.get("error"),
-                )
-                try_raise_error(account_info_response)
-                self._init_account_state()
+            return balance, account_info, receivables
 
         except Exception as e:
-            logger.exception("Exception fetching account info for %s", self.account)
-            self._init_account_state()
-            if isinstance(e, NanoException):
-                raise
-            raise NanoException(
-                f"Failed to fetch account info: {e}", "RELOAD_ERROR"
-            ) from e
+            logger.error("Exception during state reload: %s", e, exc_info=True)
 
-        logger.debug(
-            "Reload complete for %s. Balance: %s raw, Receivables: %d",
-            self.account,
-            self._balance_info.balance_raw,
-            len(self.receivable_blocks),
-        )
+            # Reset state to default on failure
+            return StateUtils.init_account_state(account)
 
 
 class BlockOperationsMixin(RpcInteractionMixin):
@@ -348,7 +246,7 @@ class BlockOperationsMixin(RpcInteractionMixin):
 
             if account_not_found(account_info_response):
                 # Account not found - check for receivables
-                if self.receivable_blocks:
+                if self._receivable_blocks:
                     # Account needs opening via a receive block
                     logger.debug(
                         "Account %s not found but has receivables", self.account

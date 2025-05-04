@@ -17,7 +17,7 @@ from ..models import (
 )
 from ..utils.conversion import raw_to_nano, nano_to_raw
 from ..utils.validation import validate_nano_amount
-from ..utils.decorators import handle_errors, reload_after
+from ..utils.decorators import handle_errors, reload_after, NanoResult
 from ..errors import (
     account_not_found,
     BlockNotFoundError,
@@ -27,11 +27,16 @@ from ..errors import (
     RpcError,
     InvalidAmountError,
     NanoException,
+    try_raise_error,
 )
+from ..utils.state_utils import StateUtils  # Import the static utility
 
 # Import mixins and protocol
 from .protocols import IAuthenticatedWallet, IReadOnlyWallet
-from .mixins import StateManagementMixin, BlockOperationsMixin
+from .mixins import BlockOperationsMixin, StateManagerMixin
+
+# Import the new component
+from .components import RpcComponent
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -45,12 +50,14 @@ RETRYABLE_ERROR_MESSAGES = [
 
 
 class NanoWalletAuthenticated(
-    StateManagementMixin,
     BlockOperationsMixin,
     IAuthenticatedWallet,
     IReadOnlyWallet,
 ):
     """Authenticated wallet implementation using composition and mixins"""
+
+    # Add the component instance
+    _rpc_component: RpcComponent
 
     def __init__(
         self,
@@ -72,23 +79,33 @@ class NanoWalletAuthenticated(
             logger.error("Failed to derive account address from private key: %s", e)
             raise ValueError(f"Invalid private key provided: {e}") from e
 
-        self.rpc = rpc
-        self.config = config or WalletConfig()
+        # Instantiate the component
+        self._rpc_component = RpcComponent(rpc)
+        # Pass the raw RPC interface to the mixin for now
+        # This is temporary until BlockOperationsMixin is replaced
+        self.rpc = rpc  # Mixin expects self.rpc
         self.private_key = private_key
+        self.config = config or WalletConfig()
 
-        # Initialize state
-        self._init_account_state()
+        self._balance_info = WalletBalance()
+        self._account_info = AccountInfo(account=self.account)
+        self._receivable_blocks = {}
+
         logger.info("Initialized NanoWalletAuthenticated for account: %s", self.account)
 
-    #
-    # IReadOnlyWallet methods
-    #
-
+    # Update reload to use StateUtils
     @handle_errors
     async def reload(self) -> None:
         """Reload wallet state from the network."""
-        await super().reload()
+        (
+            self._balance_info,
+            self._account_info,
+            self._receivable_blocks,
+        ) = await StateManagerMixin.reload_and_update(
+            account=self.account, rpc=self._rpc_component.rpc
+        )
 
+    # Update account_history to use the component
     @handle_errors
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
@@ -103,17 +120,15 @@ class NanoWalletAuthenticated(
         Returns:
             List of blocks with their details
         """
-        logger.debug("Fetching account history: count=%s, head=%s", count, head)
+        logger.debug("Fetching account history for %s via RpcComponent", self.account)
         try:
-            response = await self.rpc.account_history(
+            # Use the component's method
+            response = await self._rpc_component.account_history(
                 account=self.account, count=count, raw=True, head=head
             )
 
             if account_not_found(response):
                 return []
-
-            # Check for other errors
-            from ..errors import try_raise_error
 
             try_raise_error(response)
 
@@ -145,6 +160,10 @@ class NanoWalletAuthenticated(
         except Exception as e:
             logger.error("Error retrieving account history: %s", str(e), exc_info=True)
             raise
+
+    # BlockOperationsMixin methods still use self.rpc for now.
+    # They will be updated when the BlockComponent is introduced.
+    # Methods accessing state now work correctly via the updated reload
 
     @handle_errors
     async def has_balance(self) -> bool:
@@ -196,8 +215,9 @@ class NanoWalletAuthenticated(
         Returns:
             List of Receivable objects containing block hashes and amounts
         """
+
         await self.reload()
-        if not self.receivable_blocks:
+        if not self._receivable_blocks:
             return []
 
         # Determine the threshold to use
@@ -212,15 +232,12 @@ class NanoWalletAuthenticated(
 
         receivables = [
             Receivable(block_hash=block, amount_raw=int(amount))
-            for block, amount in self.receivable_blocks.items()
+            for block, amount in self._receivable_blocks.items()
             # Use effective_threshold here
             if int(amount) >= effective_threshold
         ]
-        return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
 
-    #
-    # IAuthenticatedWallet methods
-    #
+        return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
 
     async def _internal_send_raw(
         self,
@@ -847,7 +864,9 @@ class NanoWalletAuthenticated(
             ) from e
 
     @handle_errors
-    async def refund_first_sender(self, wait_confirmation: bool = False) -> str:
+    async def refund_first_sender(
+        self, wait_confirmation: bool = False
+    ) -> NanoResult[str]:
         """
         Send all funds back to the account that sent the first receivable.
 
@@ -855,7 +874,7 @@ class NanoWalletAuthenticated(
             wait_confirmation: Whether to wait for block confirmation
 
         Returns:
-            Hash of the processed send block
+            NanoResult containing the hash of the processed send block
         """
         # Ensure we have up-to-date state
         await super().reload()

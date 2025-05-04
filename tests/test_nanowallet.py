@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, Mock
+import asyncio
 
 from nanowallet.wallets import NanoWalletRpc
 from nanowallet.wallets import NanoWalletAuthenticated
@@ -161,7 +162,7 @@ async def test_reload_unopened(mock_rpc, mock_rpc_typed, seed, index):
         "4.000000000000000000000000000001"
     )
     assert wallet._balance_info.receivable_raw == 4000000000000000000000000000001
-    assert wallet.receivable_blocks == {
+    assert wallet._receivable_blocks == {
         "b1": "1000000000000000000000000000000",
         "b2": "1",
         "b3": "3000000000000000000000000000000",
@@ -181,7 +182,7 @@ async def test_reload_unopened_2(mock_rpc, mock_rpc_typed, seed, index):
     await wallet.reload()
 
     assert wallet._balance_info.receivable_raw == 1000000000000000000000000000123
-    assert wallet.receivable_blocks == {"b1": "1000000000000000000000000000123"}
+    assert wallet._receivable_blocks == {"b1": "1000000000000000000000000000123"}
 
 
 @pytest.mark.asyncio
@@ -205,7 +206,7 @@ async def test_reload_unopen_no_receivables(mock_rpc, mock_rpc_typed, seed, inde
     assert wallet._account_info.weight_raw == 0
     assert wallet._balance_info.receivable == 0
     assert wallet._balance_info.receivable_raw == 0
-    assert wallet.receivable_blocks == {}
+    assert wallet._receivable_blocks == {}
 
 
 @pytest.mark.asyncio
@@ -1279,21 +1280,9 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
     wallet = create_wallet_from_seed(mock_rpc, seed, index)
 
     # Mock the necessary methods
-    wallet.balance_raw = 1000
+    wallet._balance_info.balance_raw = 1000
 
     account_info_not_found = {"error": "Account not found"}
-    account_info_found = {
-        "frontier": "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78",
-        "representative": "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf",
-        "balance": "2000",
-        "representative_block": "representative_block",
-        "open_block": "open_block_hash",
-        "confirmation_height": "1",
-        "block_count": "50",
-        "account_version": "1",
-        "weight": "3000000000000000000000000000000",
-        "receivable": "1000000000000000000000000000000",
-    }
 
     # Account after receiving the block - would have the balance from the receivable
     # Make sure frontier/previous is a valid 64-char hex string
@@ -1310,25 +1299,16 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
         "receivable": "0",
     }
 
-    # Create side effects for account_info calls - extend to have enough responses
-    # for all the calls made during the test
-    account_info_responses = [
+    # Instead of setting side effects all at once, let's modify them during the test
+    mock_rpc_typed.account_info.side_effect = [
         account_info_not_found,  # Initial reload
         account_info_not_found,  # During list_receivables
         account_info_not_found,  # During refund_first_sender blocks_info lookup
-        account_info_not_found,  # During sweep initial reload
-        account_info_not_found,  # During receive_all initial reload
-        account_info_not_found,  # During _get_block_params in receive_by_hash
         account_info_after_receive,  # After receive when reloading
-        account_info_after_receive,  # During sweep's reload after receive_all
-        account_info_after_receive,  # During _get_block_params for send
-        account_info_after_receive,  # Final reload after send
-        account_info_after_receive,  # Extra responses in case more calls are made
         account_info_after_receive,
         account_info_after_receive,
     ]
 
-    mock_rpc_typed.account_info.side_effect = account_info_responses
     mock_rpc_typed.receivable.return_value = {
         "blocks": {
             "1234000000000000000000000000000000000000000000000000000000000000": "3187918000000000000000000000000"
@@ -1349,7 +1329,6 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
             }
         }
     }
-    # Call the method
     result = await wallet.refund_first_sender()
 
     assert result.success == True

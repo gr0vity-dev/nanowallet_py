@@ -1,23 +1,36 @@
 import logging
-from typing import Optional, List, Dict, Any
+import asyncio
+from typing import Optional, List
 from ..libs.rpc import INanoRpc
 from ..models import WalletConfig, WalletBalance, AccountInfo, Receivable, Transaction
 from ..utils.conversion import _raw_to_nano
-from ..utils.decorators import handle_errors, reload_after
-from ..errors import try_raise_error, account_not_found, InvalidAccountError
+from ..utils.decorators import handle_errors
+from ..errors import (
+    try_raise_error,
+    account_not_found,
+    InvalidAccountError,
+)
 from ..libs.account_helper import AccountHelper
-from ..utils import NanoResult
+from ..utils.state_utils import StateUtils  # Import the static utility
 
-# Import the protocol and mixin
+# Import the protocol
 from .protocols import IReadOnlyWallet
-from .mixins import StateManagementMixin
+
+# Import the new component
+from .components import RpcComponent
+
+# Import the mixin
+from .mixins import StateManagerMixin
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
-    """Read-only implementation of NanoWallet using composition and mixins."""
+class NanoWalletReadOnly(IReadOnlyWallet):
+    """Read-only implementation of NanoWallet using composition."""
+
+    # Add the component instance
+    _rpc_component: RpcComponent
 
     def __init__(
         self,
@@ -36,21 +49,33 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         if not AccountHelper.validate_account(account):
             raise InvalidAccountError("Invalid account address")
 
-        # Store instance attributes directly
+        # Instantiate the component
+        self._rpc_component = RpcComponent(rpc)
+        # Still need self.rpc for mixin temporarily
         self.rpc = rpc
         self.account = account
         self.config = config or WalletConfig()
 
-        # Initialize state
-        self._init_account_state()
+        # Initialize state using StateUtils instead of mixin's _init_account_state
+        self._balance_info = WalletBalance()
+        self._account_info = AccountInfo(account=account)
+        self._receivable_blocks = {}
+
         logger.info("Initialized NanoWalletReadOnly for account: %s", self.account)
 
+    # Update reload to use StateUtils
     @handle_errors
     async def reload(self) -> None:
         """Reload wallet state from the network."""
-        # Call the mixin's implementation
-        await super().reload()
+        (
+            self._balance_info,
+            self._account_info,
+            self._receivable_blocks,
+        ) = await StateManagerMixin.reload_and_update(
+            account=self.account, rpc=self._rpc_component.rpc
+        )
 
+    # Update account_history to use the component
     @handle_errors
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
@@ -65,9 +90,10 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         Returns:
             List of blocks with their details
         """
-        logger.debug("Fetching account history: count=%s, head=%s", count, head)
+        logger.debug("Fetching account history for %s via RpcComponent", self.account)
         try:
-            response = await self.rpc.account_history(
+            # Use the component's method
+            response = await self._rpc_component.account_history(
                 account=self.account, count=count, raw=True, head=head
             )
 
@@ -104,6 +130,9 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         except Exception as e:
             logger.error("Error retrieving account history: %s", str(e), exc_info=True)
             raise
+
+    # Methods accessing state now work with state calculated by StateUtils via reload
+    # has_balance, balance_info, account_info, list_receivables remain unchanged
 
     @handle_errors
     async def has_balance(self) -> bool:
@@ -154,8 +183,8 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
             List of Receivable objects containing block hashes and amounts
         """
         await self.reload()
-        # If receivable_blocks is empty, return an empty list
-        if not self.receivable_blocks:
+        # If _receivable_blocks is empty, return an empty list
+        if not self._receivable_blocks:
             return []
 
         # Determine the threshold to use
@@ -171,7 +200,7 @@ class NanoWalletReadOnly(StateManagementMixin, IReadOnlyWallet):
         # Convert blocks to Receivable objects and filter by threshold
         receivables = [
             Receivable(block_hash=block, amount_raw=int(amount))
-            for block, amount in self.receivable_blocks.items()
+            for block, amount in self._receivable_blocks.items()
             if int(amount) >= effective_threshold
         ]
 

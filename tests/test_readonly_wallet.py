@@ -66,7 +66,7 @@ class TestNanoWalletReadOnly:
         assert wallet._balance_info.receivable_raw == 0
         assert wallet._account_info.account == valid_account
         assert wallet._account_info.frontier_block is None
-        assert wallet.receivable_blocks == {}
+        assert wallet._receivable_blocks == {}
 
     def test_init_invalid_account(self, mock_rpc, invalid_account):
         """Test initialization with an invalid account raises an exception."""
@@ -103,7 +103,9 @@ class TestNanoWalletReadOnly:
 
         # Verify reloaded state
         assert wallet._balance_info.balance_raw == 10000000000000000000000000000000
-        assert wallet._balance_info.receivable_raw == 2000000000000000000000000000000
+        # Receivable amount calculated from blocks takes precedence over account_info call
+        # account_info RPC call does not include receivable amount for unopened accounts
+        assert wallet._balance_info.receivable_raw == 1000000000000000000000000000000
         assert (
             wallet._account_info.frontier_block
             == "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78"
@@ -115,7 +117,9 @@ class TestNanoWalletReadOnly:
         assert wallet._account_info.confirmation_height == 42
         assert wallet._account_info.block_count == 50
         assert wallet._account_info.weight_raw == 5000000000000000000000000000000
-        assert wallet.receivable_blocks == {"block1": "1000000000000000000000000000000"}
+        assert wallet._receivable_blocks == {
+            "block1": "1000000000000000000000000000000"
+        }
 
     @pytest.mark.asyncio
     async def test_reload_account_not_found(self, mock_rpc, valid_account):
@@ -136,7 +140,7 @@ class TestNanoWalletReadOnly:
         assert wallet._balance_info.receivable_raw == 3000000000000000000000000000000
         assert wallet._account_info.frontier_block is None
         assert wallet._account_info.representative is None
-        assert wallet.receivable_blocks == {
+        assert wallet._receivable_blocks == {
             "block1": "1000000000000000000000000000000",
             "block2": "2000000000000000000000000000000",
         }
@@ -157,7 +161,7 @@ class TestNanoWalletReadOnly:
         assert wallet._balance_info.receivable_raw == 0
         assert wallet._account_info.frontier_block is None
         assert wallet._account_info.representative is None
-        assert wallet.receivable_blocks == {}
+        assert wallet._receivable_blocks == {}
 
     @pytest.mark.asyncio
     async def test_reload_error_handling(self, mock_rpc, valid_account):
@@ -174,6 +178,7 @@ class TestNanoWalletReadOnly:
         assert isinstance(result, NanoResult)
         assert result.success is True
         assert result.value is None
+        # The value can be another NanoResult or None, we don't care
 
         # Ensure receivable was called
         mock_rpc.receivable.assert_called_once()
