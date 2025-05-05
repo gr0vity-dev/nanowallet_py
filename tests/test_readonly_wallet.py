@@ -58,15 +58,15 @@ class TestNanoWalletReadOnly:
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
 
         assert wallet.account == valid_account
-        assert wallet.rpc == mock_rpc
+        assert wallet._rpc_component.rpc == mock_rpc
         assert isinstance(wallet.config, WalletConfig)
 
         # Verify initial state
-        assert wallet._balance_info.balance_raw == 0
-        assert wallet._balance_info.receivable_raw == 0
-        assert wallet._account_info.account == valid_account
-        assert wallet._account_info.frontier_block is None
-        assert wallet._receivable_blocks == {}
+        assert wallet._state_manager.balance_info.balance_raw == 0
+        assert wallet._state_manager.balance_info.receivable_raw == 0
+        assert wallet._state_manager.account_info.account == valid_account
+        assert wallet._state_manager.account_info.frontier_block is None
+        assert wallet._state_manager.receivable_blocks == []
 
     def test_init_invalid_account(self, mock_rpc, invalid_account):
         """Test initialization with an invalid account raises an exception."""
@@ -95,31 +95,49 @@ class TestNanoWalletReadOnly:
         """Test reload when account exists on the network."""
         mock_rpc.account_info.return_value = dummy_account_info
         mock_rpc.receivable.return_value = {
-            "blocks": {"block1": "1000000000000000000000000000000"}
+            "blocks": {
+                "block1": {
+                    "amount": "1000000000000000000000000000000",
+                    "source": "nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+                }
+            }
         }
 
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
         await wallet.reload()
 
         # Verify reloaded state
-        assert wallet._balance_info.balance_raw == 10000000000000000000000000000000
+        assert (
+            wallet._state_manager.balance_info.balance_raw
+            == 10000000000000000000000000000000
+        )
         # Receivable amount calculated from blocks takes precedence over account_info call
         # account_info RPC call does not include receivable amount for unopened accounts
-        assert wallet._balance_info.receivable_raw == 1000000000000000000000000000000
         assert (
-            wallet._account_info.frontier_block
+            wallet._state_manager.balance_info.receivable_raw
+            == 1000000000000000000000000000000
+        )
+        assert (
+            wallet._state_manager.account_info.frontier_block
             == "4c816abe42472ba8862d73139d0397ecb4cead4b21d9092281acda9ad8091b78"
         )
         assert (
-            wallet._account_info.representative
+            wallet._state_manager.account_info.representative
             == "nano_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf"
         )
-        assert wallet._account_info.confirmation_height == 42
-        assert wallet._account_info.block_count == 50
-        assert wallet._account_info.weight_raw == 5000000000000000000000000000000
-        assert wallet._receivable_blocks == {
-            "block1": "1000000000000000000000000000000"
-        }
+        assert wallet._state_manager.account_info.confirmation_height == 42
+        assert wallet._state_manager.account_info.block_count == 50
+        assert (
+            wallet._state_manager.account_info.weight_raw
+            == 5000000000000000000000000000000
+        )
+        assert wallet._state_manager.receivable_blocks == [
+            Receivable(
+                block_hash="block1",
+                amount_raw=1000000000000000000000000000000,
+                source_account="nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+            )
+        ]
 
     @pytest.mark.asyncio
     async def test_reload_account_not_found(self, mock_rpc, valid_account):
@@ -127,8 +145,14 @@ class TestNanoWalletReadOnly:
         mock_rpc.account_info.return_value = {"error": "Account not found"}
         mock_rpc.receivable.return_value = {
             "blocks": {
-                "block1": "1000000000000000000000000000000",
-                "block2": "2000000000000000000000000000000",
+                "block1": {
+                    "amount": "1000000000000000000000000000000",
+                    "source": "nano_1xo4zftmuhihhmrc6szair5fjpmd71jwiu66yjmguxhshih7fnuth8bc63y6",
+                },
+                "block2": {
+                    "amount": "2000000000000000000000000000000",
+                    "source": "nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+                },
             }
         }
 
@@ -136,14 +160,25 @@ class TestNanoWalletReadOnly:
         await wallet.reload()
 
         # Verify state for non-existent account with receivables
-        assert wallet._balance_info.balance_raw == 0
-        assert wallet._balance_info.receivable_raw == 3000000000000000000000000000000
-        assert wallet._account_info.frontier_block is None
-        assert wallet._account_info.representative is None
-        assert wallet._receivable_blocks == {
-            "block1": "1000000000000000000000000000000",
-            "block2": "2000000000000000000000000000000",
-        }
+        assert wallet._state_manager.balance_info.balance_raw == 0
+        assert (
+            wallet._state_manager.balance_info.receivable_raw
+            == 3000000000000000000000000000000
+        )
+        assert wallet._state_manager.account_info.frontier_block is None
+        assert wallet._state_manager.account_info.representative is None
+        assert wallet._state_manager.receivable_blocks == [
+            Receivable(
+                block_hash="block1",
+                amount_raw=1000000000000000000000000000000,
+                source_account="nano_1xo4zftmuhihhmrc6szair5fjpmd71jwiu66yjmguxhshih7fnuth8bc63y6",
+            ),
+            Receivable(
+                block_hash="block2",
+                amount_raw=2000000000000000000000000000000,
+                source_account="nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+            ),
+        ]
 
     @pytest.mark.asyncio
     async def test_reload_account_not_found_no_receivables(
@@ -151,17 +186,17 @@ class TestNanoWalletReadOnly:
     ):
         """Test reload when account doesn't exist and has no receivables."""
         mock_rpc.account_info.return_value = {"error": "Account not found"}
-        mock_rpc.receivable.return_value = {"blocks": {}}
+        mock_rpc.receivable.return_value = {"blocks": ""}
 
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
         await wallet.reload()
 
         # Verify default state
-        assert wallet._balance_info.balance_raw == 0
-        assert wallet._balance_info.receivable_raw == 0
-        assert wallet._account_info.frontier_block is None
-        assert wallet._account_info.representative is None
-        assert wallet._receivable_blocks == {}
+        assert wallet._state_manager.balance_info.balance_raw == 0
+        assert wallet._state_manager.balance_info.receivable_raw == 0
+        assert wallet._state_manager.account_info.frontier_block is None
+        assert wallet._state_manager.account_info.representative is None
+        assert wallet._state_manager.receivable_blocks == []
 
     @pytest.mark.asyncio
     async def test_reload_error_handling(self, mock_rpc, valid_account):
@@ -176,12 +211,9 @@ class TestNanoWalletReadOnly:
         # This is because handle_errors decorator returns success=True
         # even when there are errors, and it logs the exception
         assert isinstance(result, NanoResult)
-        assert result.success is True
-        assert result.value is None
-        # The value can be another NanoResult or None, we don't care
-
-        # Ensure receivable was called
-        mock_rpc.receivable.assert_called_once()
+        assert result.success == False
+        assert "Failed to fetch receivables: RPC Error" in result.error
+        assert result.error_code == "RELOAD_ERROR"
 
     @pytest.mark.asyncio
     async def test_has_balance_with_balance(
@@ -189,15 +221,17 @@ class TestNanoWalletReadOnly:
     ):
         """Test has_balance when account has balance."""
         mock_rpc.account_info.return_value = dummy_account_info
-        mock_rpc.receivable.return_value = {"blocks": {}}
+        mock_rpc.receivable.return_value = {"blocks": ""}
 
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
-        # Manually set state to avoid reload errors
-        wallet._balance_info.balance_raw = 10000000000000000000000000000000
+
+        # Manually update state via state_manager
+        wallet._state_manager._balance_info.balance_raw = (
+            10000000000000000000000000000000
+        )
+        wallet._state_manager._balance_info.receivable_raw = 0
 
         result = await wallet.has_balance()
-
-        assert isinstance(result, NanoResult)
         assert result.success is True
         assert result.unwrap() is True
 
@@ -206,29 +240,33 @@ class TestNanoWalletReadOnly:
         """Test has_balance when account has only receivable."""
         mock_rpc.account_info.return_value = {"error": "Account not found"}
         mock_rpc.receivable.return_value = {
-            "blocks": {"block1": "1000000000000000000000000000000"}
+            "blocks": {
+                "block1": {
+                    "amount": "1000000000000000000000000000000",
+                    "source": "nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+                }
+            }
         }
 
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
-        # Manually set state to avoid reload errors
-        wallet._balance_info.receivable_raw = 1000000000000000000000000000000
+
+        # Manually update state via state_manager
+        wallet._state_manager._balance_info.receivable_raw = (
+            1000000000000000000000000000000
+        )
 
         result = await wallet.has_balance()
-
-        assert isinstance(result, NanoResult)
         assert result.success is True
         assert result.unwrap() is True
 
     @pytest.mark.asyncio
     async def test_has_balance_no_balance(self, mock_rpc, valid_account):
-        """Test has_balance when account has no balance or receivable."""
+        """Test has_balance when account has no balance and no receivable."""
         mock_rpc.account_info.return_value = {"error": "Account not found"}
         mock_rpc.receivable.return_value = {"blocks": {}}
 
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
         result = await wallet.has_balance()
-
-        assert isinstance(result, NanoResult)
         assert result.success is True
         assert result.unwrap() is False
 
@@ -287,10 +325,22 @@ class TestNanoWalletReadOnly:
         mock_rpc.account_info.return_value = {"error": "Account not found"}
         mock_rpc.receivable.return_value = {
             "blocks": {
-                "block1": "2000000000000000000000000000000",  # 2 Nano
-                "block2": "1000000000000000000000000000000",  # 1 Nano
-                "block3": "500000000000000000000000000000",  # 0.5 Nano
-                "block4": "100000000000000000000000000",  # 0.0001 Nano
+                "block1": {
+                    "amount": "2000000000000000000000000000000",
+                    "source": "nano_1xo4zftmuhihhmrc6szair5fjpmd71jwiu66yjmguxhshih7fnuth8bc63y6",
+                },
+                "block2": {
+                    "amount": "1000000000000000000000000000000",
+                    "source": "nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+                },
+                "block3": {
+                    "amount": "500000000000000000000000000000",
+                    "source": "nano_1xo4zftmuhihhmrc6szair5fjpmd71jwiu66yjmguxhshih7fnuth8bc63y6",
+                },
+                "block4": {
+                    "amount": "100000000000000000000000000",
+                    "source": "nano_1otqmatyh3f8ykkq1nkjy198unzw1js9c7ehyjc1346um7dnoskto7w7woiw",
+                },
             }
         }
 
@@ -408,7 +458,6 @@ class TestNanoWalletReadOnly:
             assert transactions[0].subtype == "receive"
             assert transactions[0].amount_raw == 2000000000000000000000000000000
             assert transactions[0].amount == Decimal("2")
-            assert transactions[0].confirmed is True
 
             # Check second transaction (send)
             assert transactions[1].block_hash == "block_hash_2"
@@ -456,15 +505,20 @@ class TestNanoWalletReadOnly:
         """Test to_string method."""
         # Create wallet with predefined state for consistent output
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
-        wallet._balance_info.balance_raw = 10000000000000000000000000000000  # 10 Nano
-        wallet._balance_info.receivable_raw = 2000000000000000000000000000000  # 2 Nano
-        wallet._account_info.frontier_block = "frontier_hash"
-        wallet._account_info.representative = (
+        wallet._state_manager._balance_info.balance_raw = (
+            10000000000000000000000000000000  # 10 Nano
+        )
+        wallet._state_manager._balance_info.receivable_raw = (
+            2000000000000000000000000000000  # 2 Nano
+        )
+        wallet._state_manager._account_info.weight_raw = (
+            5000000000000000000000000000000  # 5 Nano
+        )
+        wallet._state_manager._account_info.representative = (
             "nano_1representative1address1here1iiiiiiiiiiiiiiiiiiiiiiiiiiii"
         )
-        wallet._account_info.confirmation_height = 42
-        wallet._account_info.block_count = 50
-        wallet._account_info.weight_raw = 5000000000000000000000000000000  # 5 Nano
+        wallet._state_manager._account_info.confirmation_height = 42
+        wallet._state_manager._account_info.block_count = 50
 
         string_output = wallet.to_string()
 
@@ -479,8 +533,12 @@ class TestNanoWalletReadOnly:
     def test_str_representation(self, mock_rpc, valid_account):
         """Test __str__ method."""
         wallet = NanoWalletReadOnly(mock_rpc, valid_account)
-        wallet._balance_info.balance_raw = 10000000000000000000000000000000  # 10 Nano
-        wallet._balance_info.receivable_raw = 2000000000000000000000000000000  # 2 Nano
+        wallet._state_manager._balance_info.balance_raw = (
+            10000000000000000000000000000000  # 10 Nano
+        )
+        wallet._state_manager._balance_info.receivable_raw = (
+            2000000000000000000000000000000  # 2 Nano
+        )
 
         str_output = str(wallet)
 

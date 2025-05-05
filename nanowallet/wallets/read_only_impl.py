@@ -11,16 +11,18 @@ from ..errors import (
     InvalidAccountError,
 )
 from ..libs.account_helper import AccountHelper
-from ..utils.state_utils import StateUtils  # Import the static utility
+
+# Remove StateUtils import if only used for init previously
+# from ..utils.state_utils import StateUtils
 
 # Import the protocol
 from .protocols import IReadOnlyWallet
 
-# Import the new component
-from .components import RpcComponent
+# Import the components
+from .components import RpcComponent, StateManager, QueryOperations
 
-# Import the mixin
-from .mixins import StateManagerMixin
+# Remove mixin import
+# from .mixins import StateManagerMixin
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,9 +30,6 @@ logger = logging.getLogger(__name__)
 
 class NanoWalletReadOnly(IReadOnlyWallet):
     """Read-only implementation of NanoWallet using composition."""
-
-    # Add the component instance
-    _rpc_component: RpcComponent
 
     def __init__(
         self,
@@ -49,163 +48,62 @@ class NanoWalletReadOnly(IReadOnlyWallet):
         if not AccountHelper.validate_account(account):
             raise InvalidAccountError("Invalid account address")
 
-        # Instantiate the component
-        self._rpc_component = RpcComponent(rpc)
-        # Still need self.rpc for mixin temporarily
-        self.rpc = rpc
         self.account = account
         self.config = config or WalletConfig()
 
-        # Initialize state using StateUtils instead of mixin's _init_account_state
-        self._balance_info = WalletBalance()
-        self._account_info = AccountInfo(account=account)
-        self._receivable_blocks = {}
+        # Instantiate Components
+        self._rpc_component = RpcComponent(rpc)
+        self._state_manager = StateManager(self.account, self._rpc_component)
+        self._query_operations = QueryOperations(
+            account=self.account,
+            config=self.config,
+            rpc_component=self._rpc_component,
+            state_manager=self._state_manager,
+        )
 
         logger.info("Initialized NanoWalletReadOnly for account: %s", self.account)
 
-    # Update reload to use StateUtils
+    # Delegate Methods to Components
+
     @handle_errors
     async def reload(self) -> None:
-        """Reload wallet state from the network."""
-        (
-            self._balance_info,
-            self._account_info,
-            self._receivable_blocks,
-        ) = await StateManagerMixin.reload_and_update(
-            account=self.account, rpc=self._rpc_component.rpc
-        )
+        """Reload wallet state using the StateManager component."""
+        await self._state_manager.reload()
 
-    # Update account_history to use the component
     @handle_errors
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
     ) -> List[Transaction]:
-        """
-        Get block history for the wallet's account.
-
-        Args:
-            count: Number of blocks to retrieve, -1 for all blocks (default)
-            head: Start from specific block hash instead of latest
-
-        Returns:
-            List of blocks with their details
-        """
-        logger.debug("Fetching account history for %s via RpcComponent", self.account)
-        try:
-            # Use the component's method
-            response = await self._rpc_component.account_history(
-                account=self.account, count=count, raw=True, head=head
-            )
-
-            if account_not_found(response):
-                return []
-
-            try_raise_error(response)
-
-            # Extract and normalize the history list
-            history = response.get("history", [])
-            transactions = []
-            for block in history:
-                transactions.append(
-                    Transaction(
-                        block_hash=block["hash"],
-                        type=block["type"],
-                        subtype=block.get("subtype"),
-                        account=block["account"],
-                        previous=block["previous"],
-                        representative=block["representative"],
-                        amount_raw=int(block["amount"]),
-                        balance_raw=int(block["balance"]),
-                        timestamp=int(block["local_timestamp"]),
-                        height=int(block["height"]),
-                        confirmed=block["confirmed"] == "true",
-                        link=block["link"],
-                        signature=block["signature"],
-                        work=block["work"],
-                    )
-                )
-
-            return transactions
-
-        except Exception as e:
-            logger.error("Error retrieving account history: %s", str(e), exc_info=True)
-            raise
-
-    # Methods accessing state now work with state calculated by StateUtils via reload
-    # has_balance, balance_info, account_info, list_receivables remain unchanged
+        """Get account history using the QueryOperations component."""
+        return await self._query_operations.account_history(count=count, head=head)
 
     @handle_errors
     async def has_balance(self) -> bool:
-        """
-        Check if the account has available balance or receivable balance.
-
-        Returns:
-            True if balance or receivable balance is greater than zero
-        """
-        await self.reload()
-        return (self._balance_info.balance_raw > 0) or (
-            self._balance_info.receivable_raw > 0
-        )
+        """Check balance using the QueryOperations component (which reads state)."""
+        await self.reload()  # Call the wallet's reload method
+        return await self._query_operations.has_balance()
 
     @handle_errors
     async def balance_info(self) -> WalletBalance:
-        """
-        Get detailed balance information for the account.
-
-        Returns:
-            WalletBalance object containing current and receivable balances
-        """
+        """Get balance info using the QueryOperations component (reads state)."""
         await self.reload()
-        return self._balance_info
+        return await self._query_operations.balance_info()
 
     @handle_errors
     async def account_info(self) -> AccountInfo:
-        """
-        Get detailed account information.
-
-        Returns:
-            AccountInfo object containing account metadata
-        """
+        """Get account info using the QueryOperations component (reads state)."""
         await self.reload()
-        return self._account_info
+        return await self._query_operations.account_info()
 
     @handle_errors
     async def list_receivables(
         self, threshold_raw: Optional[int] = None
     ) -> List[Receivable]:
-        """
-        List receivable blocks sorted by descending amount.
-
-        Args:
-            threshold_raw: Minimum amount to consider (in raw). If None, uses config.min_receive_threshold_raw.
-
-        Returns:
-            List of Receivable objects containing block hashes and amounts
-        """
+        """List receivables using the QueryOperations component (reads state)."""
         await self.reload()
-        # If _receivable_blocks is empty, return an empty list
-        if not self._receivable_blocks:
-            return []
-
-        # Determine the threshold to use
-        effective_threshold = (
-            threshold_raw
-            if threshold_raw is not None
-            else self.config.min_receive_threshold_raw
+        return await self._query_operations.list_receivables(
+            threshold_raw=threshold_raw
         )
-        logger.debug(
-            "Listing receivables with effective threshold: %d raw", effective_threshold
-        )
-
-        # Convert blocks to Receivable objects and filter by threshold
-        receivables = [
-            Receivable(block_hash=block, amount_raw=int(amount))
-            for block, amount in self._receivable_blocks.items()
-            if int(amount) >= effective_threshold
-        ]
-
-        # Sort by descending amount
-        return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
 
     def to_string(self) -> str:
         """
@@ -214,23 +112,23 @@ class NanoWalletReadOnly(IReadOnlyWallet):
         Returns:
             Detailed string representation of the wallet
         """
-        balance_nano = _raw_to_nano(self._balance_info.balance_raw)
-        receivable_nano = _raw_to_nano(self._balance_info.receivable_raw)
-        weight_nano = (
-            _raw_to_nano(self._account_info.weight_raw) if self._account_info else "N/A"
-        )
-        rep = self._account_info.representative if self._account_info else "N/A"
-        conf_height = (
-            self._account_info.confirmation_height if self._account_info else "N/A"
-        )
-        block_count = self._account_info.block_count if self._account_info else "N/A"
+        # Access state via state_manager properties
+        balance_info = self._state_manager.balance_info
+        account_info = self._state_manager.account_info
+
+        balance_nano = _raw_to_nano(balance_info.balance_raw)
+        receivable_nano = _raw_to_nano(balance_info.receivable_raw)
+        weight_nano = _raw_to_nano(account_info.weight_raw) if account_info else "N/A"
+        rep = account_info.representative if account_info else "N/A"
+        conf_height = account_info.confirmation_height if account_info else "N/A"
+        block_count = account_info.block_count if account_info else "N/A"
 
         return (
             f"NanoWalletReadOnly:\n"
             f"  Account: {self.account}\n"
-            f"  Balance: {balance_nano} Nano ({self._balance_info.balance_raw} raw)\n"
-            f"  Receivable: {receivable_nano} Nano ({self._balance_info.receivable_raw} raw)\n"
-            f"  Voting Weight: {weight_nano} Nano ({getattr(self._account_info, 'weight_raw', 'N/A')} raw)\n"
+            f"  Balance: {balance_nano} Nano ({balance_info.balance_raw} raw)\n"
+            f"  Receivable: {receivable_nano} Nano ({balance_info.receivable_raw} raw)\n"
+            f"  Voting Weight: {weight_nano} Nano ({getattr(account_info, 'weight_raw', 'N/A')} raw)\n"
             f"  Representative: {rep}\n"
             f"  Confirmation Height: {conf_height}\n"
             f"  Block Count: {block_count}"
@@ -243,8 +141,9 @@ class NanoWalletReadOnly(IReadOnlyWallet):
         Returns:
             Simple string representation of the wallet
         """
+        balance_info = self._state_manager.balance_info
         return (
             f"NanoWalletReadOnly: Account={self.account}, "
-            f"BalanceRaw={self._balance_info.balance_raw}, "
-            f"ReceivableRaw={self._balance_info.receivable_raw}"
+            f"BalanceRaw={balance_info.balance_raw}, "
+            f"ReceivableRaw={balance_info.receivable_raw}"
         )

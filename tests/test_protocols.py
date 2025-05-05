@@ -57,14 +57,14 @@ async def authenticated_wallet(rpc_client):
 class TestReadOnlyWallet:
     """Tests for the IReadOnlyWallet implementation."""
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_reload_readonly(self, read_only_wallet):
         """Test reload functionality."""
         result = await read_only_wallet.reload()
         assert result.success
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_account_info(self, read_only_wallet):
         """Test account info retrieval."""
@@ -73,7 +73,7 @@ class TestReadOnlyWallet:
         info = result.unwrap()
         assert info.account is not None
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_balance_info(self, read_only_wallet):
         """Test balance info retrieval."""
@@ -83,7 +83,7 @@ class TestReadOnlyWallet:
         assert isinstance(balance.balance_raw, int)
         assert isinstance(balance.receivable_raw, int)
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_has_balance(self, read_only_wallet):
         """Test has_balance method."""
@@ -91,7 +91,7 @@ class TestReadOnlyWallet:
         assert result.success
         # result is either True or False, both are valid
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_list_receivables(self, read_only_wallet):
         """Test receivables listing."""
@@ -100,7 +100,7 @@ class TestReadOnlyWallet:
         receivables = result.unwrap()
         assert isinstance(receivables, list)
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_account_history(self, read_only_wallet):
         """Test account history retrieval."""
@@ -113,14 +113,14 @@ class TestReadOnlyWallet:
 class TestAuthenticatedWallet:
     """Tests for the IAuthenticatedWallet implementation."""
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_reload_authenticated(self, authenticated_wallet):
         """Test reload functionality."""
         result = await authenticated_wallet.reload()
         assert result.success
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_account_info(self, authenticated_wallet):
         """Test account info retrieval."""
@@ -129,7 +129,7 @@ class TestAuthenticatedWallet:
         info = result.unwrap()
         assert info.account is not None
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_balance_info(self, authenticated_wallet):
         """Test balance info retrieval."""
@@ -139,7 +139,7 @@ class TestAuthenticatedWallet:
         assert isinstance(balance.balance_raw, int)
         assert isinstance(balance.receivable_raw, int)
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_send(self, authenticated_wallet, account_address):
         """Test has_balance method."""
@@ -147,7 +147,7 @@ class TestAuthenticatedWallet:
         assert result.success
         # result is either True or False, both are valid
 
-    @pytest.mark.skip(reason="Only run this test manually when a node is available")
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_receive_all(self, authenticated_wallet):
         """Test receive_all functionality."""
@@ -163,11 +163,9 @@ class TestAuthenticatedWallet:
             received = receive_result.unwrap()
             assert isinstance(received, list)
 
-    @pytest.mark.skip(
-        reason="Only run this test manually when you want to actually send funds"
-    )
+    @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_send(self, authenticated_wallet, account_address):
+    async def test_send_2(self, authenticated_wallet, account_address):
         """Test send functionality (skipped by default)."""
         # First check balance
         balance_result = await authenticated_wallet.balance_info()

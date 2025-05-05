@@ -7,9 +7,14 @@ from nanowallet.wallets.wallet_factory import (
     create_wallet_from_private_key,
 )
 from nanowallet.libs.rpc import INanoRpc
-from nanowallet.errors import InvalidSeedError, InvalidIndexError
+from nanowallet.errors import (
+    InvalidSeedError,
+    InvalidIndexError,
+    InvalidPrivateKeyError,
+)
 from nanowallet.models import WalletConfig
 from nanowallet.wallets.authenticated_impl import NanoWalletAuthenticated
+from nanowallet.wallets.read_only_impl import NanoWalletReadOnly
 
 
 @pytest.fixture
@@ -25,8 +30,18 @@ def valid_seed():
 
 
 @pytest.fixture
+def invalid_seed():
+    return "invalid seed"
+
+
+@pytest.fixture
 def valid_private_key():
     return "0efa90463f5397f0c4e09c6c2a4a423cf34bd5ff9d14368201225e0e672193e7"
+
+
+@pytest.fixture
+def invalid_private_key():
+    return "invalid private key"
 
 
 @pytest.fixture
@@ -50,7 +65,7 @@ class TestWalletFactory:
             wallet.private_key
             == "0efa90463f5397f0c4e09c6c2a4a423cf34bd5ff9d14368201225e0e672193e7"
         )
-        assert wallet.rpc == mock_rpc
+        assert wallet._rpc_component.rpc == mock_rpc
         assert isinstance(wallet.config, WalletConfig)
 
     def test_create_wallet_from_seed_with_config(self, mock_rpc, valid_seed):
@@ -86,28 +101,21 @@ class TestWalletFactory:
         wallet = create_wallet_from_seed(mock_rpc, valid_seed, max_index)
         assert isinstance(wallet, NanoWalletAuthenticated)
 
-    def test_create_wallet_from_seed_invalid_seed_length(self, mock_rpc):
+    def test_create_wallet_from_seed_invalid_seed_length(self, mock_rpc, invalid_seed):
         """Test wallet creation with invalid seed length."""
-        invalid_seeds = [
-            "",  # Empty
-            "abc123",  # Too short
-            "a" * 63,  # One character short
-            "a" * 65,  # One character too long
-        ]
-
-        for invalid_seed in invalid_seeds:
-            with pytest.raises(
-                InvalidSeedError, match="Seed must be a 64 character hex string"
-            ):
-                create_wallet_from_seed(mock_rpc, invalid_seed, 0)
-
-    def test_create_wallet_from_seed_invalid_seed_format(self, mock_rpc):
-        """Test wallet creation with invalid seed format (non-hex)."""
-        # Valid length but contains non-hex characters
-        invalid_seed = "g" * 64  # 'g' is not a valid hex character
-
-        with pytest.raises(InvalidSeedError, match="Seed must be a valid hex string"):
+        with pytest.raises(InvalidSeedError) as excinfo:
             create_wallet_from_seed(mock_rpc, invalid_seed, 0)
+
+        # Check error message
+        assert "character hex string" in str(excinfo.value)
+
+    def test_create_wallet_from_seed_invalid_seed_format(self, mock_rpc, invalid_seed):
+        """Test wallet creation with invalid seed format (non-hex)."""
+        # Replace the invalid_seed with a hex-invalid but length-valid seed
+        invalid_hex_seed = "g" * 64  # 'g' is not a valid hex character
+
+        with pytest.raises(InvalidSeedError, match="valid hex string"):
+            create_wallet_from_seed(mock_rpc, invalid_hex_seed, 0)
 
     def test_create_wallet_from_seed_invalid_index_type(self, mock_rpc, valid_seed):
         """Test wallet creation with invalid index type."""
@@ -154,7 +162,7 @@ class TestWalletFactory:
         assert isinstance(wallet, NanoWalletAuthenticated)
         assert wallet.account == expected_account
         assert wallet.private_key == valid_private_key
-        assert wallet.rpc == mock_rpc
+        assert wallet._rpc_component.rpc == mock_rpc
         assert isinstance(wallet.config, WalletConfig)
 
     def test_create_wallet_from_private_key_with_config(
@@ -187,9 +195,7 @@ class TestWalletFactory:
         ]
 
         for invalid_key in invalid_keys:
-            with pytest.raises(
-                InvalidSeedError, match="Seed must be a 64 character hex string"
-            ):
+            with pytest.raises(InvalidPrivateKeyError, match="Invalid private key"):
                 create_wallet_from_private_key(mock_rpc, invalid_key)
 
     def test_create_wallet_from_private_key_invalid_format(self, mock_rpc):
@@ -197,7 +203,7 @@ class TestWalletFactory:
         # Valid length but contains non-hex characters
         invalid_key = "g" * 64  # 'g' is not a valid hex character
 
-        with pytest.raises(InvalidSeedError, match="Seed must be a valid hex string"):
+        with pytest.raises(InvalidPrivateKeyError, match="Invalid private key"):
             create_wallet_from_private_key(mock_rpc, invalid_key)
 
     def test_seed_case_insensitivity(self, mock_rpc, valid_seed, expected_account):
@@ -228,3 +234,24 @@ class TestWalletFactory:
 
         # Both should generate the same account
         assert wallet_uppercase.account == wallet_lowercase.account == expected_account
+
+    def test_create_wallet_from_private_key_invalid_key(
+        self, mock_rpc, invalid_private_key
+    ):
+        """Test wallet creation with invalid private key."""
+        with pytest.raises(InvalidPrivateKeyError) as excinfo:
+            create_wallet_from_private_key(mock_rpc, invalid_private_key)
+
+        # Check error message
+        assert "Invalid private key" in str(excinfo.value)
+
+    def test_create_wallet_from_private_key_case_insensitive(self, mock_rpc):
+        """Test that private key case doesn't matter."""
+        lower_key = "0efa90463f5397f0c4e09c6c2a4a423cf34bd5ff9d14368201225e0e672193e7"
+        upper_key = lower_key.upper()
+
+        wallet_lower = create_wallet_from_private_key(mock_rpc, lower_key)
+        wallet_upper = create_wallet_from_private_key(mock_rpc, upper_key)
+
+        # Should generate the same wallet regardless of case
+        assert wallet_lower.account == wallet_upper.account

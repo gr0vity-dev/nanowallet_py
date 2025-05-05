@@ -34,7 +34,7 @@ class StateUtils:
 
         balance_info = WalletBalance()
         account_info = AccountInfo(account=account)
-        receivable_blocks = {}
+        receivable_blocks = []
         return balance_info, account_info, receivable_blocks
 
     @staticmethod
@@ -50,7 +50,7 @@ class StateUtils:
         # Initialize default values
         balance_info = WalletBalance()
         account_info = AccountInfo(account=account)
-        receivable_blocks = {}
+        receivable_blocks = []
         receivable_sum = 0
 
         # 1. Fetch receivables
@@ -58,16 +58,26 @@ class StateUtils:
             receivable_response = await rpc.receivable(
                 account, threshold=1, include_source=True
             )
-
             if not account_not_found(receivable_response) and no_error(
                 receivable_response
             ):
-                blocks = receivable_response.get("blocks", {})
-                receivable_blocks = blocks if isinstance(blocks, dict) else {}
+                blocks_data = receivable_response.get("blocks", {})
+                if blocks_data == "":
+                    receivable_blocks = []
+                else:
+                    # The response structure has block hashes as keys in the "blocks" dictionary
+                    receivable_blocks = [
+                        Receivable(
+                            block_hash=block_hash,
+                            amount_raw=int(block_info.get("amount", "0")),
+                            source_account=block_info.get("source", ""),
+                        )
+                        for block_hash, block_info in blocks_data.items()
+                    ]
 
                 # Calculate receivable sum
                 receivable_sum = (
-                    sum(int(amount) for amount in receivable_blocks.values())
+                    sum(block.amount_raw for block in receivable_blocks)
                     if receivable_blocks
                     else 0
                 )

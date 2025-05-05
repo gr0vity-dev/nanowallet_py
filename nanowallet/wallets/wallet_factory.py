@@ -1,7 +1,7 @@
 from typing import Optional
 from ..models import WalletConfig
 from ..libs.account_helper import AccountHelper
-from ..errors import InvalidSeedError, InvalidIndexError
+from ..errors import InvalidSeedError, InvalidIndexError, InvalidPrivateKeyError
 from ..libs.rpc import INanoRpc
 from .protocols import IAuthenticatedWallet
 from .authenticated_impl import NanoWalletAuthenticated
@@ -72,19 +72,17 @@ def create_wallet_from_private_key(
         An authenticated wallet implementation
 
     Raises:
-        InvalidSeedError: If seed is invalid
-        InvalidIndexError: If index is invalid
-        ValueError: If private key generation fails
+        ValueError: If the private key is invalid
     """
-    # Validate seed
+    # Validate private key
     if not isinstance(private_key, str) or len(private_key) != SEED_LENGTH:
-        raise InvalidSeedError("Seed must be a 64 character hex string")
+        raise InvalidPrivateKeyError("Invalid private key")
     try:
         int(private_key, 16)  # Validate hex
     except ValueError as e:
-        raise InvalidSeedError("Seed must be a valid hex string") from e
+        raise InvalidPrivateKeyError("Invalid private key") from e
 
-    # Convert seed to lowercase for consistency
+    # Convert private key to lowercase for consistency
     private_key_lower = private_key.lower()
 
     # Create and return the authenticated wallet implementation

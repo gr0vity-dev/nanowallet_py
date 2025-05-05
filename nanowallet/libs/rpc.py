@@ -32,7 +32,9 @@ class INanoRpc(Protocol):
     ) -> Dict[str, Any]:
         """Get block information"""
 
-    async def work_generate(self, hash: str, use_peers: bool = False) -> Dict[str, Any]:
+    async def work_generate(
+        self, block_hash: str, use_peers: bool = False
+    ) -> Dict[str, Any]:
         """Generate work for block"""
 
     async def process(self, block: Dict[str, Any]) -> Dict[str, Any]:
@@ -58,7 +60,7 @@ class INanoRpc(Protocol):
         """Get account history"""
 
 
-class NanoWalletRpc:
+class NanoWalletRpc(INanoRpc):
     """Abstraction layer for Nano RPC operations"""
 
     def __init__(

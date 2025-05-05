@@ -57,6 +57,13 @@ class BlockNotFoundError(NanoException):
         super().__init__(message, "BLOCK_NOT_FOUND")
 
 
+class InvalidPrivateKeyError(NanoException):
+    """Raised when private key format is invalid."""
+
+    def __init__(self, message: str):
+        super().__init__(message, "INVALID_PRIVATE_KEY")
+
+
 class InvalidSeedError(NanoException):
     """Raised when seed format is invalid."""
 

@@ -33,10 +33,12 @@ from ..utils.state_utils import StateUtils  # Import the static utility
 
 # Import mixins and protocol
 from .protocols import IAuthenticatedWallet, IReadOnlyWallet
-from .mixins import BlockOperationsMixin, StateManagerMixin
 
-# Import the new component
-from .components import RpcComponent
+# Import components
+from .components import RpcComponent, StateManager, QueryOperations, BlockOperations
+
+# Remove mixin imports
+# from .mixins import BlockOperationsMixin, StateManagerMixin
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -49,15 +51,8 @@ RETRYABLE_ERROR_MESSAGES = [
 ]
 
 
-class NanoWalletAuthenticated(
-    BlockOperationsMixin,
-    IAuthenticatedWallet,
-    IReadOnlyWallet,
-):
-    """Authenticated wallet implementation using composition and mixins"""
-
-    # Add the component instance
-    _rpc_component: RpcComponent
+class NanoWalletAuthenticated(IAuthenticatedWallet, IReadOnlyWallet):
+    """Authenticated wallet implementation using composition"""
 
     def __init__(
         self,
@@ -74,271 +69,78 @@ class NanoWalletAuthenticated(
             config: Optional wallet configuration
         """
         try:
-            self.account = AccountHelper.get_account_address(private_key)
+            # Derive account first
+            account = AccountHelper.get_account_address(private_key)
         except Exception as e:
             logger.error("Failed to derive account address from private key: %s", e)
             raise ValueError(f"Invalid private key provided: {e}") from e
 
-        # Instantiate the component
-        self._rpc_component = RpcComponent(rpc)
-        # Pass the raw RPC interface to the mixin for now
-        # This is temporary until BlockOperationsMixin is replaced
-        self.rpc = rpc  # Mixin expects self.rpc
+        self.account = account
         self.private_key = private_key
         self.config = config or WalletConfig()
 
-        self._balance_info = WalletBalance()
-        self._account_info = AccountInfo(account=self.account)
-        self._receivable_blocks = {}
+        # Instantiate Components
+        self._rpc_component = RpcComponent(rpc)
+        self._state_manager = StateManager(self.account, self._rpc_component)
+        self._query_operations = QueryOperations(
+            account=self.account,
+            config=self.config,
+            rpc_component=self._rpc_component,
+            state_manager=self._state_manager,
+        )
+        self._block_operations = BlockOperations(
+            account=self.account,
+            private_key=self.private_key,
+            config=self.config,
+            rpc_component=self._rpc_component,
+            state_manager=self._state_manager,
+        )
 
         logger.info("Initialized NanoWalletAuthenticated for account: %s", self.account)
 
-    # Update reload to use StateUtils
+    # --- Delegate Read-Only Methods ---
+
     @handle_errors
     async def reload(self) -> None:
-        """Reload wallet state from the network."""
-        (
-            self._balance_info,
-            self._account_info,
-            self._receivable_blocks,
-        ) = await StateManagerMixin.reload_and_update(
-            account=self.account, rpc=self._rpc_component.rpc
-        )
-
-    # Update account_history to use the component
-    @handle_errors
-    async def account_history(
-        self, count: Optional[int] = -1, head: Optional[str] = None
-    ) -> List[Transaction]:
-        """
-        Get block history for the wallet's account.
-
-        Args:
-            count: Number of blocks to retrieve, -1 for all blocks (default)
-            head: Start from specific block hash instead of latest
-
-        Returns:
-            List of blocks with their details
-        """
-        logger.debug("Fetching account history for %s via RpcComponent", self.account)
-        try:
-            # Use the component's method
-            response = await self._rpc_component.account_history(
-                account=self.account, count=count, raw=True, head=head
-            )
-
-            if account_not_found(response):
-                return []
-
-            try_raise_error(response)
-
-            # Parse the history list
-            history = response.get("history", [])
-            transactions = []
-            for block in history:
-                transactions.append(
-                    Transaction(
-                        block_hash=block["hash"],
-                        type=block["type"],
-                        subtype=block.get("subtype"),
-                        account=block["account"],
-                        previous=block["previous"],
-                        representative=block["representative"],
-                        amount_raw=int(block["amount"]),
-                        balance_raw=int(block["balance"]),
-                        timestamp=int(block["local_timestamp"]),
-                        height=int(block["height"]),
-                        confirmed=block["confirmed"] == "true",
-                        link=block["link"],
-                        signature=block["signature"],
-                        work=block["work"],
-                    )
-                )
-
-            return transactions
-
-        except Exception as e:
-            logger.error("Error retrieving account history: %s", str(e), exc_info=True)
-            raise
-
-    # BlockOperationsMixin methods still use self.rpc for now.
-    # They will be updated when the BlockComponent is introduced.
-    # Methods accessing state now work correctly via the updated reload
+        """Reload wallet state using the StateManager component."""
+        await self._state_manager.reload()
 
     @handle_errors
     async def has_balance(self) -> bool:
-        """
-        Check if the account has available balance or receivable balance.
-
-        Returns:
-            True if balance or receivable balance is greater than zero
-        """
-
-        await self.reload()
-        return (self._balance_info.balance_raw > 0) or (
-            self._balance_info.receivable_raw > 0
-        )
+        """Check balance using the QueryOperations component."""
+        await self.reload()  # Reload state first
+        return await self._query_operations.has_balance()
 
     @handle_errors
     async def balance_info(self) -> WalletBalance:
-        """
-        Get detailed balance information for the account.
-
-        Returns:
-            WalletBalance object containing current and receivable balances
-        """
+        """Get balance info using the QueryOperations component."""
         await self.reload()
-        return self._balance_info
+        return await self._query_operations.balance_info()
 
     @handle_errors
     async def account_info(self) -> AccountInfo:
-        """
-        Get detailed account information.
-
-        Returns:
-            AccountInfo object containing account metadata
-        """
-        logger.debug("Fetching account info for account: %s", self.account)
+        """Get account info using the QueryOperations component."""
         await self.reload()
-        return self._account_info
+        return await self._query_operations.account_info()
 
     @handle_errors
     async def list_receivables(
         self, threshold_raw: Optional[int] = None
     ) -> List[Receivable]:
-        """
-        List receivable blocks sorted by descending amount.
-
-        Args:
-            threshold_raw: Minimum amount to consider (in raw). If None, uses config.min_receive_threshold_raw.
-
-        Returns:
-            List of Receivable objects containing block hashes and amounts
-        """
-
+        """List receivables using the QueryOperations component."""
         await self.reload()
-        if not self._receivable_blocks:
-            return []
-
-        # Determine the threshold to use
-        effective_threshold = (
-            threshold_raw
-            if threshold_raw is not None
-            else self.config.min_receive_threshold_raw
-        )
-        logger.debug(
-            "Listing receivables with effective threshold: %d raw", effective_threshold
+        return await self._query_operations.list_receivables(
+            threshold_raw=threshold_raw
         )
 
-        receivables = [
-            Receivable(block_hash=block, amount_raw=int(amount))
-            for block, amount in self._receivable_blocks.items()
-            # Use effective_threshold here
-            if int(amount) >= effective_threshold
-        ]
+    @handle_errors
+    async def account_history(
+        self, count: Optional[int] = -1, head: Optional[str] = None
+    ) -> List[Transaction]:
+        """Get account history using the QueryOperations component."""
+        return await self._query_operations.account_history(count=count, head=head)
 
-        return sorted(receivables, key=lambda x: x.amount_raw, reverse=True)
-
-    async def _internal_send_raw(
-        self,
-        destination_account: str,
-        amount_raw: int,
-        wait_confirmation: bool = False,
-        timeout: int = 30,
-    ) -> str:
-        """
-        Internal helper for sending raw amount (used by public methods).
-
-        Args:
-            destination_account: Destination account address
-            amount_raw: Amount to send in raw units
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation in seconds
-
-        Returns:
-            Hash of the processed send block
-
-        Raises:
-            InvalidAccountError: If destination account is invalid
-            InsufficientBalanceError: If account has insufficient balance
-            InvalidAmountError: If amount is not positive or below minimum required
-            RpcError: If node returns error during processing
-            TimeoutException: If confirmation times out
-        """
-        logger.debug(
-            "(Internal) Attempting to send %s raw to %s",
-            amount_raw,
-            destination_account,
-        )
-
-        # Guard clause: Ensure amount is positive
-        if amount_raw <= 0:
-            raise InvalidAmountError("Send amount must be positive.")
-
-        # Guard clause: Check against minimum send amount configured
-        if amount_raw < self.config.min_send_amount_raw:
-            min_req = self.config.min_send_amount_raw
-            # Attempt to provide clearer error message with Nano conversion
-
-            min_nano = raw_to_nano(min_req)
-            sent_nano = raw_to_nano(amount_raw)
-            msg = (
-                f"Send amount {sent_nano} Nano ({amount_raw} raw) is below the minimum configured amount "
-                f"{min_nano} Nano ({min_req} raw)."
-                f"Please configure the min_send_amount_raw in your WalletConfig."
-            )
-
-            raise InvalidAmountError(msg)
-
-        # Validate destination
-        if not destination_account:
-            logger.error("Invalid destination account: None")
-            raise InvalidAccountError("Destination can't be None")
-        if not AccountHelper.validate_account(destination_account):
-            logger.error("Invalid destination account format: %s", destination_account)
-            raise InvalidAccountError("Invalid destination account format")
-
-        # Get latest block parameters
-        params = await self._get_block_params()
-
-        # Calculate new balance and validate
-        new_balance = params["balance"] - amount_raw
-        if params["balance"] == 0 or new_balance < 0:
-            msg = f"Insufficient balance for send! balance: {params['balance']} send_amount: {amount_raw}"
-            logger.error(msg)
-            raise InsufficientBalanceError(msg)
-
-        # Build the block
-        block = await self._build_block(
-            previous=params["previous"],
-            representative=params["representative"],
-            balance=new_balance,
-            destination_account=destination_account,
-        )
-
-        # Process the block
-        block_hash = await self._process_block(
-            block, f"send of {amount_raw} raw to {destination_account}"
-        )
-
-        # Wait for confirmation if requested
-        if wait_confirmation:
-            logger.info(
-                "Send block %s processed, waiting for confirmation (timeout=%ds)...",
-                block_hash,
-                timeout,
-            )
-            confirmed = await self._wait_for_confirmation(
-                block_hash, timeout=timeout, raise_on_timeout=True
-            )
-            if not confirmed:  # Should not happen if raise_on_timeout=True
-                logger.warning("Block %s processed but confirmation failed", block_hash)
-        else:
-            logger.info(
-                "Send block %s processed. Confirmation not requested.", block_hash
-            )
-
-        return block_hash
+    # --- Delegate Authenticated Methods ---
 
     @reload_after
     @handle_errors
@@ -349,27 +151,9 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> str:
-        """
-        Send raw amount to destination account.
-
-        Args:
-            destination_account: Destination account address
-            amount_raw: Amount to send in raw units
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            Hash of the processed send block
-        """
-        try:
-            amount_val = int(amount_raw)
-            if amount_val <= 0:
-                raise InvalidAmountError("Send amount must be positive")
-        except ValueError as e:
-            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}") from e
-
-        return await self._internal_send_raw(
-            destination_account, amount_val, wait_confirmation, timeout
+        """Delegate send_raw to BlockOperations."""
+        return await self._block_operations.send_raw(
+            destination_account, amount_raw, wait_confirmation, timeout
         )
 
     @reload_after
@@ -381,29 +165,9 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> str:
-        """
-        Send amount in NANO units to destination account.
-
-        Args:
-            destination_account: Destination account address
-            amount: Amount to send in NANO units
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            Hash of the processed send block
-        """
-        # Validate and convert amount
-        amount_decimal = validate_nano_amount(amount)
-        amount_raw = nano_to_raw(amount_decimal)
-
-        if amount_raw == 0 and amount_decimal > 0:
-            raise InvalidAmountError(
-                f"Amount {amount_decimal} Nano is too small (less than 1 raw)"
-            )
-
-        return await self._internal_send_raw(
-            destination_account, amount_raw, wait_confirmation, timeout
+        """Delegate send to BlockOperations."""
+        return await self._block_operations.send(
+            destination_account, amount, wait_confirmation, timeout
         )
 
     @reload_after
@@ -418,145 +182,16 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> str:
-        """
-        Send raw amount with automatic retries on concurrency errors.
-
-        Args:
-            destination_account: Destination account address
-            amount_raw: Amount to send in raw units
-            max_retries: Maximum number of retry attempts
-            retry_delay_base: Initial delay between retries in seconds
-            retry_delay_backoff: Multiplier for delay between retries
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            Hash of the processed send block
-        """
-        # Validate amount
-        try:
-            amount_val = int(amount_raw)
-            if amount_val <= 0:
-                raise InvalidAmountError("Send amount must be positive")
-        except ValueError:
-            raise InvalidAmountError(f"Invalid raw amount format: {amount_raw}")
-
-        retries = 0
-        last_error = None
-
-        while retries <= max_retries:
-            attempt = retries + 1
-            logger.debug(
-                "Send attempt %s/%s for %s raw to %s",
-                attempt,
-                max_retries + 1,
-                amount_val,
-                destination_account,
-            )
-
-            try:
-                # Reload state before each attempt to get latest state
-                await super().reload()
-
-                # Try to send
-                block_hash = await self._internal_send_raw(
-                    destination_account, amount_val, wait_confirmation, timeout
-                )
-
-                logger.info(
-                    "Send attempt %s SUCCEEDED. Hash: %s",
-                    attempt,
-                    block_hash,
-                )
-                return block_hash  # Success
-
-            except RpcError as e:
-                last_error = e
-                # Check if error is retryable
-                is_retryable = any(
-                    phrase in e.message for phrase in RETRYABLE_ERROR_MESSAGES
-                )
-
-                if is_retryable and retries < max_retries:
-                    retries += 1
-                    delay = retry_delay_base * (retry_delay_backoff ** (retries - 1))
-                    logger.warning(
-                        "Send attempt %s failed with retryable RPC error ('%s'). "
-                        "Retrying (%s/%s) after %.2fs...",
-                        attempt,
-                        e.message,
-                        retries,
-                        max_retries,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue  # Try again
-                else:
-                    logger.error(
-                        "Send attempt %s failed with RPC error ('%s') "
-                        "and will not retry (retryable=%s, retries=%s).",
-                        attempt,
-                        e.message,
-                        is_retryable,
-                        retries,
-                    )
-                    raise e  # Fail permanently
-
-            except (
-                InsufficientBalanceError,
-                InvalidAccountError,
-                InvalidAmountError,
-            ) as e:
-                # Non-retryable errors
-                last_error = e
-                logger.error(
-                    "Send attempt %s failed with non-retryable error: %s",
-                    attempt,
-                    e,
-                )
-                raise e  # Fail permanently
-
-            except TimeoutException as e:
-                # Confirmation timeout
-                last_error = e
-                logger.error(
-                    "Send attempt %s failed due to confirmation timeout: %s",
-                    attempt,
-                    e,
-                )
-                raise e  # Fail permanently
-
-            except Exception as e:
-                # Unexpected errors
-                last_error = e
-                logger.error(
-                    "Send attempt %s failed with unexpected error: %s",
-                    attempt,
-                    e,
-                )
-
-                if not isinstance(e, NanoException):
-                    raise NanoException(
-                        f"Unexpected error during send attempt: {e}",
-                        "UNEXPECTED_SEND_ERROR",
-                    ) from e
-                else:
-                    raise e  # Re-raise if already a NanoException
-
-        # If we get here, all retries failed
-        logger.error(
-            "Send failed after %s attempts. Last error: %s",
-            max_retries + 1,
-            last_error,
+        """Delegate send_raw_with_retry to BlockOperations."""
+        return await self._block_operations.send_raw_with_retry(
+            destination_account,
+            amount_raw,
+            max_retries,
+            retry_delay_base,
+            retry_delay_backoff,
+            wait_confirmation,
+            timeout,
         )
-
-        if last_error:
-            raise last_error  # Re-raise the last error
-        else:
-            # Should not reach here if we made at least one attempt
-            raise NanoException(
-                f"Send failed after {max_retries+1} attempts.", "MAX_RETRIES_EXCEEDED"
-            ) from e
 
     @reload_after
     @handle_errors
@@ -570,126 +205,28 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> str:
-        """
-        Send amount in NANO units with automatic retries on concurrency errors.
-
-        Args:
-            destination_account: Destination account address
-            amount: Amount to send in NANO units
-            max_retries: Maximum number of retry attempts
-            retry_delay_base: Initial delay between retries in seconds
-            retry_delay_backoff: Multiplier for delay between retries
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            Hash of the processed send block
-        """
-        # Validate and convert amount
-        amount_decimal = validate_nano_amount(amount)
-        amount_raw = nano_to_raw(amount_decimal)
-
-        if amount_raw == 0 and amount_decimal > 0:
-            raise InvalidAmountError(
-                f"Amount {amount_decimal} Nano is too small (less than 1 raw)"
-            )
-
-        # Call the raw retry version
-        result = await self.send_raw_with_retry(
+        """Delegate send_with_retry to BlockOperations."""
+        return await self._block_operations.send_with_retry(
             destination_account,
-            amount_raw,
-            max_retries=max_retries,
-            retry_delay_base=retry_delay_base,
-            retry_delay_backoff=retry_delay_backoff,
-            wait_confirmation=wait_confirmation,
-            timeout=timeout,
+            amount,
+            max_retries,
+            retry_delay_base,
+            retry_delay_backoff,
+            wait_confirmation,
+            timeout,
         )
-
-        return result  # The result is unwrapped by the handle_errors decorator
 
     @reload_after
     @handle_errors
     async def receive_by_hash(
         self, block_hash: str, wait_confirmation: bool = True, timeout: int = 30
     ) -> ReceivedBlock:
-        """
-        Receive a specific pending block by its hash.
-
-        Args:
-            block_hash: Hash of the pending block to receive
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            ReceivedBlock object with details of the received block
-        """
-        logger.debug(
-            "Starting receive_by_hash for block %s, wait_confirmation=%s, timeout=%s",
-            block_hash,
-            wait_confirmation,
-            timeout,
+        """Delegate receive_by_hash to BlockOperations."""
+        return await self._block_operations.receive_by_hash(
+            block_hash, wait_confirmation, timeout
         )
 
-        try:
-            # Get info about the send block
-            send_block_info = await self._block_info(block_hash)
-            amount_raw = int(send_block_info["amount"])
-            source_account = send_block_info["block_account"]
-            logger.debug(
-                "Block %s is a send of %s raw from %s",
-                block_hash,
-                amount_raw,
-                source_account,
-            )
-
-            # Get parameters for the receive block
-            params = await self._get_block_params()
-            new_balance = params["balance"] + amount_raw
-            logger.debug("Building receive block with new_balance=%s", new_balance)
-
-            # Build and process the receive block
-            block = await self._build_block(
-                previous=params["previous"],
-                representative=params["representative"],
-                balance=new_balance,
-                source_hash=block_hash,
-            )
-
-            received_hash = await self._process_block(
-                block, f"receive of {amount_raw} raw from block {block_hash}"
-            )
-
-            logger.debug("Receive block processed with hash %s", received_hash)
-
-            # Wait for confirmation if requested
-            confirmed = False
-            if wait_confirmation:
-                logger.info(
-                    "Receive block %s processed, waiting for confirmation (timeout=%ds)...",
-                    received_hash,
-                    timeout,
-                )
-                confirmed = await self._wait_for_confirmation(
-                    received_hash, timeout=timeout, raise_on_timeout=True
-                )
-                logger.info("Receive block %s confirmed: %s", received_hash, confirmed)
-
-            # Return the result
-            return ReceivedBlock(
-                block_hash=received_hash,
-                amount_raw=amount_raw,
-                source=source_account,
-                confirmed=confirmed,
-            )
-
-        except BlockNotFoundError as e:
-            logger.error("Failed to receive block %s: Send block not found", block_hash)
-            raise e
-        except Exception as e:
-            logger.exception(
-                "Exception during receive_by_hash for block %s", block_hash
-            )
-            raise e
+    # --- Implement Orchestration Methods ---
 
     @reload_after
     @handle_errors
@@ -699,77 +236,90 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> List[ReceivedBlock]:
-        """
-        Receive all pending blocks above the threshold.
-
-        Args:
-            threshold_raw: Minimum amount to receive in raw units
-            wait_confirmation: Whether to wait for block confirmations
-            timeout: Maximum time to wait for each block confirmation
-
-        Returns:
-            List of ReceivedBlock objects with details of all received blocks
-        """
-        # Determine threshold description for logging
+        """Receive all pending blocks above the threshold."""
         threshold_desc = (
             f"{threshold_raw} raw"
             if threshold_raw is not None
             else f"config default ({self.config.min_receive_threshold_raw} raw)"
         )
         logger.info(
-            "Starting receive_all (threshold=%s, wait_confirmation=%s)",
+            "NanoWalletAuthenticated: Starting receive_all (threshold=%s, wait_confirmation=%s)",
             threshold_desc,
             wait_confirmation,
         )
 
-        # Pass threshold_raw (which might be None) to list_receivables
-        receivables_result = await self.list_receivables(threshold_raw=threshold_raw)
-        receivables = receivables_result.unwrap()
+        # 1. List receivables
+        try:
+            await self.reload()  # Ensure state is fresh before listing
+            receivables = await self._query_operations.list_receivables(
+                threshold_raw=threshold_raw
+            )
+        except Exception as e:
+            logger.error(
+                "NanoWalletAuthenticated: Failed to list receivables during receive_all: %s",
+                e,
+            )
+            raise NanoException(
+                f"Failed to list receivables for receive_all: {e}",
+                "LIST_RECEIVABLES_ERROR",
+            ) from e
 
         if not receivables:
-            logger.info("No receivable blocks found matching criteria.")
+            logger.info(
+                "NanoWalletAuthenticated: No receivable blocks found matching criteria."
+            )
             return []
 
-        logger.info("Found %s receivable blocks to process.", len(receivables))
-        processed_blocks = []
+        logger.info(
+            "NanoWalletAuthenticated: Found %s receivable blocks to process.",
+            len(receivables),
+        )
+        processed_blocks: List[ReceivedBlock] = []
+        errors_encountered = []
 
-        # Process each receivable block
+        # 2. Iterate and call receive_by_hash for each
         for receivable in receivables:
             logger.debug(
-                "Attempting to receive block %s (%s raw)",
+                "NanoWalletAuthenticated: Attempting to receive block %s (%s raw)",
                 receivable.block_hash,
                 receivable.amount_raw,
             )
-
             try:
-                receive_result = await self.receive_by_hash(
+                processed_block = await self._block_operations.receive_by_hash(
                     receivable.block_hash,
                     wait_confirmation=wait_confirmation,
                     timeout=timeout,
                 )
-
-                processed_block = (
-                    receive_result.unwrap()
-                )  # Explicitly unwrap the result
                 logger.info(
-                    "Successfully received block %s -> new block %s",
+                    "NanoWalletAuthenticated: Successfully received block %s -> new block %s",
                     receivable.block_hash,
                     processed_block.block_hash,
                 )
                 processed_blocks.append(processed_block)
-
             except Exception as e:
-                # Log error but continue with other blocks
+                # Log error but continue processing others
                 logger.error(
-                    "Failed to receive block %s: %s", receivable.block_hash, str(e)
+                    "NanoWalletAuthenticated: Failed to receive block %s during receive_all: %s",
+                    receivable.block_hash,
+                    str(e),
                 )
-                # Option: Could re-raise here to stop on first error
-                raise NanoException(str(e), "RECEIVE_BLOCK_ERROR") from e
+                errors_encountered.append(f"Hash {receivable.block_hash}: {str(e)}")
+
+        if errors_encountered:
+            # TODO, add warnings instead of raising exceptions when len(processed_blocks) > 0:
+            raise NanoException(
+                f"""NanoWalletAuthenticated: receive_all finished with
+{len(processed_blocks)} blocks processed.
+{len(errors_encountered)} errors :
+{"\n".join(errors_encountered)}""",
+                "RECEIVE_ALL_ERROR",
+            )
 
         logger.info(
-            "Receive_all finished. Successfully processed %s blocks.",
+            "NanoWalletAuthenticated: Receive_all finished. Successfully processed %s blocks.",
             len(processed_blocks),
         )
+
         return processed_blocks
 
     @reload_after
@@ -782,27 +332,14 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = True,
         timeout: int = 30,
     ) -> str:
-        """
-        Receive all pending funds and send all balance to destination account.
-
-        Args:
-            destination_account: Account to send funds to
-            sweep_pending: Whether to receive pending blocks first
-            threshold_raw: Minimum amount to consider for receiving (in raw). If None, uses config.min_receive_threshold_raw.
-            wait_confirmation: Whether to wait for block confirmation
-            timeout: Maximum time to wait for confirmation
-
-        Returns:
-            Hash of the send block
-        """
-        # Determine threshold description for logging
+        """Sweep all funds to the destination address."""
         threshold_desc = (
             f"{threshold_raw} raw"
             if threshold_raw is not None
             else f"config default ({self.config.min_receive_threshold_raw} raw)"
         )
         logger.info(
-            "Starting sweep to %s (sweep_pending=%s, threshold=%s)",
+            "NanoWalletAuthenticated: Starting sweep to %s (sweep_pending=%s, threshold=%s)",
             destination_account,
             sweep_pending,
             threshold_desc,
@@ -811,133 +348,67 @@ class NanoWalletAuthenticated(
         if not AccountHelper.validate_account(destination_account):
             raise InvalidAccountError("Invalid destination account for sweep")
 
+        # 1. Optionally receive pending first
         if sweep_pending:
             logger.info("Sweep: Attempting to receive pending blocks first.")
             try:
-                # Pass threshold_raw (which might be None) to receive_all
                 await self.receive_all(
                     threshold_raw=threshold_raw,
                     wait_confirmation=False,
                     timeout=timeout,
                 )
                 logger.info(
-                    "Sweep: Pending blocks received successfully (or none to receive)."
+                    "Sweep: Pending blocks processed. Reloading state before send."
                 )
-                await super().reload()  # Reload state after potentially receiving blocks
+                await self.reload()  # Explicit reload after receive_all finishes
             except Exception as e:
-                logger.warning("Sweep: Error receiving some pending blocks: %s", str(e))
-                # Continue with sweeping the existing balance
+                # Log warning but continue sweep attempt
+                logger.warning(
+                    "Sweep: Error receiving some pending blocks, proceeding with sweep anyway: %s",
+                    str(e),
+                )
+                await self.reload()  # Reload even if receive_all failed
 
-        # Get current balance
-        current_balance_raw = self._balance_info.balance_raw
+        # 2. Check current balance
+        current_balance_raw = self._state_manager.balance_info.balance_raw
         if current_balance_raw <= 0:
             logger.warning(
                 "Sweep: No balance to sweep (Balance: %d raw).", current_balance_raw
             )
             raise InsufficientBalanceError("No balance to sweep.")
 
+        # 3. Send the entire balance
         logger.info(
             "Sweep: Sending balance of %d raw to %s",
             current_balance_raw,
             destination_account,
         )
-
-        # Send the entire balance
         try:
-            send_result = await self.send_raw_with_retry(
+            # Use retry version for robustness
+            final_hash = await self._block_operations.send_raw_with_retry(
                 destination_account=destination_account,
                 amount_raw=current_balance_raw,
                 wait_confirmation=wait_confirmation,
                 timeout=timeout,
             )
-            final_hash = send_result.unwrap()  # Explicitly unwrap the result
-
             logger.info("Sweep successful. Sent block hash: %s", final_hash)
             return final_hash
-
         except Exception as e:
             logger.error("Sweep failed: Error during send: %s", str(e))
             if isinstance(e, NanoException):
-                raise
+                raise  # Re-raise known Nano exceptions
+            # Wrap unexpected errors
             raise NanoException(
                 f"Sweep failed during send: {e}", "SWEEP_SEND_ERROR"
             ) from e
 
-    @handle_errors
-    async def refund_first_sender(
-        self, wait_confirmation: bool = False
-    ) -> NanoResult[str]:
-        """
-        Send all funds back to the account that sent the first receivable.
-
-        Args:
-            wait_confirmation: Whether to wait for block confirmation
-
-        Returns:
-            NanoResult containing the hash of the processed send block
-        """
-        # Ensure we have up-to-date state
-        await super().reload()
-
-        # Check if we have balance
-        if (
-            self._balance_info.balance_raw <= 0
-            and self._balance_info.receivable_raw <= 0
-        ):
-            raise InsufficientBalanceError("No funds available to refund.")
-
-        refund_account = None
-
-        # Try to get the sender from the open block
-        if self._account_info and self._account_info.open_block:
-            try:
-                open_block_info = await self._block_info(self._account_info.open_block)
-                refund_account = open_block_info.get("source_account")
-            except Exception as e:
-                logger.warning(
-                    "Could not determine refund account from open block: %s", str(e)
-                )
-
-        # If we couldn't get it from the open block, try the first receivable
-        if not refund_account:
-            try:
-                receivables_result = await self.list_receivables()
-                receivables = receivables_result.unwrap()
-
-                if receivables:
-                    first_receivable = receivables[0]
-                    block_info = await self._block_info(first_receivable.block_hash)
-                    refund_account = block_info.get("block_account")
-            except Exception as e:
-                logger.warning(
-                    "Could not determine refund account from receivables: %s", str(e)
-                )
-
-        # If we still don't have a refund account, we can't proceed
-        if not AccountHelper.validate_account(refund_account):
-            raise InvalidAccountError(
-                f"Determined refund account is invalid: {refund_account}"
-            )
-
-        # Sweep funds to the refund account
-        logger.info("Refunding all funds to %s", refund_account)
-        sweep_result = await self.sweep(
-            destination_account=refund_account,
-            sweep_pending=True,
-            wait_confirmation=wait_confirmation,
-        )
-
-        # Unwrap the result
-        refund_hash = sweep_result.unwrap()
-        logger.info("Refund successful. Block hash: %s", refund_hash)
-        return refund_hash
-
     async def _internal_refund_receivable(
         self, receivable_hash: str, wait_confirmation: bool, timeout: int
     ) -> RefundDetail:
-        """Internal logic to refund a single receivable block hash (simplified)."""
+        """Internal logic to receive a block and send it back to its source."""
         logger.debug(
-            "Simplified internal refund processing for receivable: %s", receivable_hash
+            "NanoWalletAuthenticated: Internal refund processing for receivable: %s",
+            receivable_hash,
         )
         receive_hash: Optional[str] = None
         refund_hash: Optional[str] = None
@@ -945,48 +416,28 @@ class NanoWalletAuthenticated(
         amount_raw: int = 0
         status: RefundStatus = RefundStatus.INITIATED
         error_message: Optional[str] = None
-        received_block: Optional[ReceivedBlock] = None  # Keep track if receive succeeds
+        received_block: Optional[ReceivedBlock] = None
 
         try:
-            # Step 1: Receive the block. This internally handles getting block info first.
-            logger.debug("Attempting receive for refund: %s", receivable_hash)
-            receive_result = await self.receive_by_hash(
-                receivable_hash,
-                wait_confirmation=wait_confirmation,  # Pass confirmation flag
-                timeout=timeout,
+            # 1. Receive the block
+            logger.debug(
+                "Refund Internal: Attempting receive for refund: %s", receivable_hash
             )
-            # If receive_by_hash failed internally (e.g., block not found, RPC error), unwrap will raise
-            received_block = receive_result.unwrap()
-
-            # If receive succeeded:
+            received_block = await self._block_operations.receive_by_hash(
+                receivable_hash, wait_confirmation=wait_confirmation, timeout=timeout
+            )
             receive_hash = received_block.block_hash
             amount_raw = received_block.amount_raw
-            source_account = received_block.source  # Get sender from the result
-            if source_account == self.account:
-                logger.info(
-                    "Received block %s -> new block %s. Source: %s, Amount: %s raw",
-                    receivable_hash,
-                    receive_hash,
-                    source_account,
-                    amount_raw,
-                )
-                return RefundDetail(
-                    receivable_hash=receivable_hash,
-                    amount_raw=amount_raw,
-                    source_account=source_account,
-                    status=RefundStatus.SKIPPED,
-                    error_message="Refunding to self",
-                )
-
+            source_account = received_block.source
             logger.info(
-                "Received block %s -> new block %s. Source: %s, Amount: %s raw",
+                "Refund Internal: Received block %s -> new block %s. Source: %s, Amount: %s raw",
                 receivable_hash,
                 receive_hash,
                 source_account,
                 amount_raw,
             )
 
-            # Basic validation after receive (optional, but good practice)
+            # 2. Validate received info
             if not source_account or not AccountHelper.validate_account(source_account):
                 raise InvalidAccountError(
                     f"Invalid source account obtained after receive: {source_account}"
@@ -996,21 +447,40 @@ class NanoWalletAuthenticated(
                     f"Non-positive amount obtained after receive: {amount_raw}"
                 )
 
-            # Step 2: Send the refund using info from the received block
+            # Skip refunding to self
+            if source_account == self.account:
+                logger.info(
+                    "Refund Internal: Skipping refund for block %s as source is self (%s)",
+                    receivable_hash,
+                    self.account,
+                )
+                status = RefundStatus.SKIPPED
+                error_message = "Refunding to self"
+                return RefundDetail(
+                    receivable_hash=receivable_hash,
+                    amount_raw=amount_raw,
+                    status=status,
+                    source_account=source_account,
+                    receive_hash=receive_hash,
+                    refund_hash=None,
+                    error_message=error_message,
+                )
+
+            # 3. Send the refund
             logger.debug(
-                "Attempting refund send to %s for %s raw", source_account, amount_raw
+                "Refund Internal: Attempting refund send to %s for %s raw",
+                source_account,
+                amount_raw,
             )
-            send_result = await self.send_raw(
+            refund_hash = await self._block_operations.send_raw(
                 destination_account=source_account,
                 amount_raw=amount_raw,
-                wait_confirmation=wait_confirmation,  # Pass confirmation flag
+                wait_confirmation=wait_confirmation,
                 timeout=timeout,
             )
-            # If send failed, unwrap will raise
-            refund_hash = send_result.unwrap()
             status = RefundStatus.SUCCESS
             logger.info(
-                "Successfully refunded %s raw to %s. Refund block hash: %s",
+                "Refund Internal: Successfully refunded %s raw to %s. Refund block hash: %s",
                 amount_raw,
                 source_account,
                 refund_hash,
@@ -1025,51 +495,46 @@ class NanoWalletAuthenticated(
             TimeoutException,
             NanoException,
         ) as e:
-            # Determine status based on whether receive succeeded
-            if (
-                received_block is None
-            ):  # Failed during receive_by_hash or validation right after
+            # Handle specific errors during receive or send phases
+            error_code = getattr(e, "code", "REFUND_ERROR")
+            if received_block is None:
+                # Error occurred during receive phase or info validation
                 status = RefundStatus.RECEIVE_FAILED
-                error_message = (
-                    f"Failed to receive block or invalid data retrieved: {e.message}"
-                )
-                logger.error("%s (receivable_hash: %s)", error_message, receivable_hash)
-                # Try to populate amount/source for the report if possible (best effort)
-                if (
-                    isinstance(e, (InvalidAccountError, InvalidAmountError))
-                    and source_account
-                ):
-                    # source_account might be set but invalid
-                    pass
-                elif status == RefundStatus.RECEIVE_FAILED and amount_raw == 0:
-                    # Attempt to get info directly if receive failed early
-                    try:
-                        logger.debug(
-                            "Attempting block info lookup after receive failure: %s",
-                            receivable_hash,
-                        )
-                        block_info = await self._block_info(receivable_hash)
-                        amount_raw = int(block_info.get("amount", 0))
-                        source_account = block_info.get("block_account")
-                    except Exception as info_e:
-                        logger.warning(
-                            "Could not retrieve block info after receive failure for %s: %s",
-                            receivable_hash,
-                            info_e,
-                        )
-            else:  # Failed during send_raw
-                status = RefundStatus.SEND_FAILED
-                error_message = f"Failed to send refund: {e.message}"
+                error_message = f"Failed to receive block or invalid data: {str(e)}"
                 logger.error(
-                    "%s (dest: %s, amount: %s)",
+                    "Refund Internal: %s (receivable_hash: %s)",
+                    error_message,
+                    receivable_hash,
+                )
+                # Try to get amount/source if possible, even if receive failed
+                try:
+                    logger.debug(
+                        "Refund Internal: Attempting block info lookup after receive failure: %s",
+                        receivable_hash,
+                    )
+                    block_info = await self._rpc_component.block_info(receivable_hash)
+                    if amount_raw == 0:
+                        amount_raw = int(block_info.get("amount", 0))
+                    if source_account is None:
+                        source_account = block_info.get("block_account")
+                except Exception as info_e:
+                    logger.warning(
+                        "Refund Internal: Could not retrieve block info after receive failure for %s: %s",
+                        receivable_hash,
+                        info_e,
+                    )
+            else:
+                # Error occurred during send phase
+                status = RefundStatus.SEND_FAILED
+                error_message = f"Failed to send refund: {str(e)}"
+                logger.error(
+                    "Refund Internal: %s (dest: %s, amount: %s)",
                     error_message,
                     source_account,
                     amount_raw,
                 )
 
-            # Add error code if available
-            if hasattr(e, "code") and e.code:
-                error_message = f"[{e.code}] {error_message}"
+            error_message = f"[{error_code}] {error_message}"
 
         except Exception as e:
             # Catch any other unexpected errors
@@ -1077,16 +542,16 @@ class NanoWalletAuthenticated(
             error_message = (
                 f"Unexpected error processing refund for {receivable_hash}: {e}"
             )
-            logger.exception(error_message)  # Log with stack trace
+            logger.exception("Refund Internal: %s", error_message)  # Log full traceback
 
-        # Return final detail for this receivable
+        # 4. Create and return detail object
         return RefundDetail(
             receivable_hash=receivable_hash,
-            amount_raw=amount_raw,  # Best effort
-            source_account=source_account,  # Best effort
+            amount_raw=amount_raw,  # Amount might be 0 if info lookup failed
+            source_account=source_account,  # Source might be None if info lookup failed
             status=status,
-            receive_hash=receive_hash,  # Populated if receive step succeeded
-            refund_hash=refund_hash,  # Populated if send step succeeded
+            receive_hash=receive_hash,  # Will be None if receive failed
+            refund_hash=refund_hash,  # Will be None if send failed
             error_message=error_message,
         )
 
@@ -1095,20 +560,12 @@ class NanoWalletAuthenticated(
     async def refund_receivable_by_hash(
         self, receivable_hash: str, wait_confirmation: bool = False, timeout: int = 30
     ) -> RefundDetail:
-        """
-        Receives a specific pending block and immediately refunds the amount to the sender.
-
-        Args:
-            receivable_hash: The hash of the send block to receive and refund.
-            wait_confirmation: Whether to wait for network confirmation for receive and send blocks.
-            timeout: Timeout in seconds for waiting for confirmation.
-
-        Returns:
-            A RefundDetail object detailing the refund attempt.
-        """
-        logger.info("Starting refund_receivable_by_hash for block %s", receivable_hash)
-
-        # Call the internal method that contains the core logic
+        """Receives a specific block and sends the funds back to the sender."""
+        logger.info(
+            "NanoWalletAuthenticated: Starting refund_receivable_by_hash for block %s",
+            receivable_hash,
+        )
+        # Delegate to the internal orchestration method
         result_detail = await self._internal_refund_receivable(
             receivable_hash=receivable_hash,
             wait_confirmation=wait_confirmation,
@@ -1116,6 +573,7 @@ class NanoWalletAuthenticated(
         )
         return result_detail
 
+    @reload_after
     @handle_errors
     async def refund_all_receivables(
         self,
@@ -1123,57 +581,177 @@ class NanoWalletAuthenticated(
         wait_confirmation: bool = False,
         timeout: int = 30,
     ) -> List[RefundDetail]:
-        """
-        Receives all pending blocks above a threshold and immediately refunds each amount to its sender.
-
-        Args:
-            threshold_raw: The minimum amount in raw units to be considered for refund.
-            wait_confirmation: Whether to wait for network confirmation for receive and send blocks.
-            timeout: Timeout in seconds for waiting for confirmation.
-
-        Returns:
-            List of refund details with status
-        """
-        # Determine threshold description for logging
+        """Refunds all receivable blocks above an optional threshold."""
         threshold_desc = (
             f"{threshold_raw} raw"
             if threshold_raw is not None
             else f"config default ({self.config.min_receive_threshold_raw} raw)"
         )
         logger.info(
-            "Starting refund_all_receivables (threshold=%s, wait_confirmation=%s)",
+            "NanoWalletAuthenticated: Starting refund_all_receivables (threshold=%s, wait_confirmation=%s)",
             threshold_desc,
             wait_confirmation,
         )
 
-        # Pass threshold_raw (which might be None) to list_receivables
-        list_result = await self.list_receivables(threshold_raw=threshold_raw)
-        receivables = list_result.unwrap()
+        # 1. List receivables
+        try:
+            await self.reload()  # Freshen state
+            receivables = await self._query_operations.list_receivables(
+                threshold_raw=threshold_raw
+            )
+        except Exception as e:
+            logger.error(
+                "NanoWalletAuthenticated: Failed to list receivables during refund_all: %s",
+                e,
+            )
+            raise NanoException(
+                f"Failed to list receivables for refund_all: {e}",
+                "LIST_RECEIVABLES_ERROR",
+            ) from e
 
         if not receivables:
-            logger.info("No receivable blocks found matching criteria for refund.")
+            logger.info(
+                "NanoWalletAuthenticated: No receivable blocks found matching criteria for refund."
+            )
             return []
 
-        logger.info("Found %s receivable blocks to attempt refund.", len(receivables))
+        logger.info(
+            "NanoWalletAuthenticated: Found %s receivable blocks to attempt refund.",
+            len(receivables),
+        )
         refund_results: List[RefundDetail] = []
 
+        # 2. Iterate and call internal refund logic for each
         for receivable in receivables:
-            # Call the internal refund logic for each receivable hash
-            # Note: This processes refunds sequentially. Reloading state between each refund
-            # might be necessary if subsequent sends depend on the state change from the previous receive/send cycle.
             detail = await self._internal_refund_receivable(
                 receivable_hash=receivable.block_hash,
                 wait_confirmation=wait_confirmation,
                 timeout=timeout,
             )
             refund_results.append(detail)
-            # Optional: Add a small delay between refunds if needed
-            # await asyncio.sleep(0.1)
 
         logger.info(
-            "refund_all_receivables finished. Processed %s blocks.", len(receivables)
+            "NanoWalletAuthenticated: refund_all_receivables finished. Processed %s blocks.",
+            len(receivables),
         )
         return refund_results
+
+    @handle_errors
+    async def refund_first_sender(self, wait_confirmation: bool = False) -> str:
+        """
+        Receives all pending funds and sends the entire balance back to the
+        account that sent the *first ever* block (open block) to this wallet.
+        """
+        # Reload state first to get current balance and account info
+        await self.reload()
+
+        current_balance = self._state_manager.balance_info.balance_raw
+        current_receivable = self._state_manager.balance_info.receivable_raw
+        account_info = self._state_manager.account_info
+
+        if current_balance <= 0 and current_receivable <= 0:
+            raise InsufficientBalanceError(
+                "No funds available (balance or receivable) to refund."
+            )
+
+        refund_account: Optional[str] = None
+        ZERO_HASH = "0" * 64
+
+        # 1. Try getting source from Open Block
+        if account_info and account_info.open_block:
+            logger.debug(
+                "RefundFirstSender: Trying to get source from open block: %s",
+                account_info.open_block,
+            )
+            try:
+                open_block_info = await self._rpc_component.block_info(
+                    account_info.open_block
+                )
+                link_pk = open_block_info.get("contents", {}).get("link")
+                if link_pk and link_pk != ZERO_HASH:
+                    refund_account = AccountHelper.get_account(public_key=link_pk)
+                    logger.info(
+                        "RefundFirstSender: Determined refund account from open block source: %s",
+                        refund_account,
+                    )
+                else:
+                    logger.warning(
+                        "RefundFirstSender: Open block %s found, but link was zero or missing.",
+                        account_info.open_block,
+                    )
+            except BlockNotFoundError:
+                logger.warning(
+                    "RefundFirstSender: Open block %s not found.",
+                    account_info.open_block,
+                )
+            except Exception as e:
+                logger.warning(
+                    "RefundFirstSender: Could not determine refund account from open block %s: %s",
+                    account_info.open_block,
+                    str(e),
+                )
+
+        # 2. If open block failed, try oldest receivable
+        if not refund_account:
+            logger.debug(
+                "RefundFirstSender: Open block source failed, trying oldest receivable."
+            )
+            try:
+                receivables = await self._query_operations.list_receivables(
+                    threshold_raw=0
+                )  # Get all receivables
+                if receivables:
+                    first_receivable = receivables[0]
+                    logger.debug(
+                        "RefundFirstSender: Trying block info for receivable: %s",
+                        first_receivable.block_hash,
+                    )
+                    block_info = await self._rpc_component.block_info(
+                        first_receivable.block_hash
+                    )
+                    source = block_info.get(
+                        "block_account"
+                    )  # Sender of the receivable block
+                    if source:
+                        refund_account = source
+                        logger.info(
+                            "RefundFirstSender: Determined refund account from receivable source: %s",
+                            refund_account,
+                        )
+                    else:
+                        logger.warning(
+                            "RefundFirstSender: Could not get source from receivable block %s info.",
+                            first_receivable.block_hash,
+                        )
+                else:
+                    logger.warning(
+                        "RefundFirstSender: No receivable blocks found to determine source."
+                    )
+            except Exception as e:
+                logger.warning(
+                    "RefundFirstSender: Could not determine refund account from receivables: %s",
+                    str(e),
+                )
+
+        # 3. Validate refund account
+        if not refund_account or not AccountHelper.validate_account(refund_account):
+            raise InvalidAccountError(
+                f"Could not determine a valid refund account. Attempted: {refund_account}"
+            )
+
+        # 4. Perform the sweep to the determined account
+        logger.info("RefundFirstSender: Sweeping all funds to %s", refund_account)
+        refund_hash = await self.sweep(
+            destination_account=refund_account,
+            sweep_pending=True,  # Ensure pending are received first
+            threshold_raw=0,  # Receive all pending regardless of amount
+            wait_confirmation=wait_confirmation,
+        )
+
+        logger.info(
+            "RefundFirstSender: Refund sweep successful. Block hash: %s", refund_hash
+        )
+        return refund_hash.unwrap()
 
     def to_string(self) -> str:
         """
@@ -1182,23 +760,23 @@ class NanoWalletAuthenticated(
         Returns:
             Detailed string representation of the wallet
         """
-        balance_nano = raw_to_nano(self._balance_info.balance_raw)
-        receivable_nano = raw_to_nano(self._balance_info.receivable_raw)
-        weight_nano = (
-            raw_to_nano(self._account_info.weight_raw) if self._account_info else "N/A"
-        )
-        rep = self._account_info.representative if self._account_info else "N/A"
-        conf_height = (
-            self._account_info.confirmation_height if self._account_info else "N/A"
-        )
-        block_count = self._account_info.block_count if self._account_info else "N/A"
+        # Access state via state_manager properties
+        balance_info = self._state_manager.balance_info
+        account_info = self._state_manager.account_info
+
+        balance_nano = raw_to_nano(balance_info.balance_raw)
+        receivable_nano = raw_to_nano(balance_info.receivable_raw)
+        weight_nano = raw_to_nano(account_info.weight_raw) if account_info else "N/A"
+        rep = account_info.representative if account_info else "N/A"
+        conf_height = account_info.confirmation_height if account_info else "N/A"
+        block_count = account_info.block_count if account_info else "N/A"
 
         return (
             f"NanoWalletAuthenticated:\n"
             f"  Account: {self.account}\n"
-            f"  Balance: {balance_nano} Nano ({self._balance_info.balance_raw} raw)\n"
-            f"  Receivable: {receivable_nano} Nano ({self._balance_info.receivable_raw} raw)\n"
-            f"  Voting Weight: {weight_nano} Nano ({getattr(self._account_info, 'weight_raw', 'N/A')} raw)\n"
+            f"  Balance: {balance_nano} Nano ({balance_info.balance_raw} raw)\n"
+            f"  Receivable: {receivable_nano} Nano ({balance_info.receivable_raw} raw)\n"
+            f"  Voting Weight: {weight_nano} Nano ({getattr(account_info, 'weight_raw', 'N/A')} raw)\n"
             f"  Representative: {rep}\n"
             f"  Confirmation Height: {conf_height}\n"
             f"  Block Count: {block_count}"
@@ -1211,8 +789,9 @@ class NanoWalletAuthenticated(
         Returns:
             Simple string representation of the wallet
         """
+        balance_info = self._state_manager.balance_info
         return (
             f"NanoWalletAuthenticated: Account={self.account}, "
-            f"BalanceRaw={self._balance_info.balance_raw}, "
-            f"ReceivableRaw={self._balance_info.receivable_raw}"
+            f"BalanceRaw={balance_info.balance_raw}, "
+            f"ReceivableRaw={balance_info.receivable_raw}"
         )

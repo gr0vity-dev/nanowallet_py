@@ -64,6 +64,7 @@ class Receivable:
 
     block_hash: str
     amount_raw: int
+    source_account: str
 
     @property
     def amount(self) -> Decimal:
