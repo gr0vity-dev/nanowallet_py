@@ -13,7 +13,7 @@ authors = [
 requires-python = ">=3.7"
 dependencies = [
     "nano_lib_py==0.5.1",
-    "nanorpc==0.1.7",
+    "nanorpc>=0.28.0",
 ]
 
 [project.urls]

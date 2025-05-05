@@ -1,3 +1,3 @@
 nano_lib_py
-nanorpc
+nanorpc>=0.28.0
 setuptools

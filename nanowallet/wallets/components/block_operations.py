@@ -163,9 +163,9 @@ class BlockOperations:
         logger.debug(
             "BlockOperations: Processing block for operation: %s", operation_desc
         )
-        block_json = block.json()
+        block_dict = block.to_dict()
         # Process block using RpcComponent
-        block_hash = await self._rpc_component.process_block(block_json)
+        block_hash = await self._rpc_component.process_block(block_dict)
         logger.debug(
             "BlockOperations: Successfully processed %s, hash: %s",
             operation_desc,

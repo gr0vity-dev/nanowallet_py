@@ -71,6 +71,10 @@ class NanoWalletBlock:
         """Set the work value on the block"""
         self._block.set_work(work)
 
-    def json(self) -> dict:
+    def json(self) -> str:
         """Get the block as a JSON-compatible dictionary"""
         return self._block.json()
+
+    def to_dict(self) -> dict:
+        """Get the block as a dictionary"""
+        return self._block.to_dict()

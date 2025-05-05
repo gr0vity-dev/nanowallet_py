@@ -644,7 +644,6 @@ class NanoWalletAuthenticated(IAuthenticatedWallet, IReadOnlyWallet):
             )
 
         refund_account: Optional[str] = None
-        ZERO_HASH = "0" * 64
 
         # 1. Try getting source from Open Block
         if account_info and account_info.open_block:
@@ -656,9 +655,9 @@ class NanoWalletAuthenticated(IAuthenticatedWallet, IReadOnlyWallet):
                 open_block_info = await self._rpc_component.block_info(
                     account_info.open_block
                 )
-                link_pk = open_block_info.get("contents", {}).get("link")
-                if link_pk and link_pk != ZERO_HASH:
-                    refund_account = AccountHelper.get_account(public_key=link_pk)
+                source_account = open_block_info.get("source_account")
+                if source_account:
+                    refund_account = source_account
                     logger.info(
                         "RefundFirstSender: Determined refund account from open block source: %s",
                         refund_account,
@@ -723,10 +722,9 @@ class NanoWalletAuthenticated(IAuthenticatedWallet, IReadOnlyWallet):
                 )
 
         # 3. Validate refund account
-        if not refund_account or not AccountHelper.validate_account(refund_account):
-            raise InvalidAccountError(
-                f"Could not determine a valid refund account. Attempted: {refund_account}"
-            )
+        account_info = await self._rpc_component.fetch_account_info(refund_account)
+        if not account_info.get("frontier"):
+            raise InvalidAccountError(f"Refund account {refund_account} not found.")
 
         # 4. Perform the sweep to the determined account
         logger.info("RefundFirstSender: Sweeping all funds to %s", refund_account)

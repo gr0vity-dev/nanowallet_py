@@ -1,7 +1,7 @@
 # nanowallet/models.py
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from .utils.conversion import _raw_to_nano
 from .libs.account_helper import AccountHelper

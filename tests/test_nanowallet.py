@@ -1414,9 +1414,23 @@ async def test_refund_first_sender_unopened(mock_rpc, mock_rpc_typed, seed, inde
         "receivable": "0",
     }
 
+    account_info_first_sender = {
+        "frontier": "a" * 64,  # Valid 64-char hex string for previous
+        "representative": "nano_118tih7f81iiuujdezyqnbb9aonybf6y3cj7mo7hbeetqiymkn16a67w8rkp",
+        "balance": "3187918000000000000000000000000",
+        "representative_block": "a" * 64,
+        "open_block": "a" * 64,
+        "confirmation_height": "1",
+        "block_count": "1",
+        "account_version": "1",
+        "weight": "0",
+        "receivable": "0",
+    }
+
     # Instead of setting side effects all at once, let's modify them during the test
     mock_rpc_typed.account_info.side_effect = [
         account_info_not_found,  # Initial reload
+        account_info_first_sender,  # querying destination account
         account_info_not_found,  # During list_receivables
         account_info_not_found,  # During refund_first_sender blocks_info lookup
         account_info_after_receive,  # After receive when reloading

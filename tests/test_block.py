@@ -363,29 +363,23 @@ class TestNanoWalletBlock:
         # Verify underlying block.set_work was called
         mock_block_instance.set_work.assert_called_once_with(valid_work)
 
-    @patch("nanowallet.libs.block.Block")
     def test_json(
         self,
-        mock_block_class,
         valid_account,
         valid_previous,
         valid_representative,
         valid_balance,
     ):
         """Test json method."""
-        mock_block_instance = Mock()
         expected_json = {
-            "type": "state",
             "account": valid_account,
-            "previous": valid_previous,
+            "previous": valid_previous.upper(),
             "representative": valid_representative,
             "balance": str(valid_balance),
             "link": "0" * 64,
-            "signature": "sig123",
-            "work": "work456",
+            "link_as_account": "nano_1111111111111111111111111111111111111111111111111111hifc8npp",
+            "type": "state",
         }
-        mock_block_instance.json.return_value = expected_json
-        mock_block_class.return_value = mock_block_instance
 
         block = NanoWalletBlock(
             account=valid_account,
@@ -398,8 +392,38 @@ class TestNanoWalletBlock:
         json_output = block.json()
 
         # Verify json method returns correct value
+        assert json_output == str(expected_json).replace("'", '"')
+
+    def test_to_dict(
+        self,
+        valid_account,
+        valid_previous,
+        valid_representative,
+        valid_balance,
+    ):
+        """Test json method."""
+        expected_json = {
+            "type": "state",
+            "account": valid_account,
+            "previous": valid_previous.upper(),
+            "representative": valid_representative,
+            "balance": str(valid_balance),
+            "link": "0" * 64,
+            "link_as_account": "nano_1111111111111111111111111111111111111111111111111111hifc8npp",
+        }
+
+        block = NanoWalletBlock(
+            account=valid_account,
+            previous=valid_previous,
+            representative=valid_representative,
+            balance=valid_balance,
+        )
+
+        # Get JSON representation
+        json_output = block.to_dict()
+
+        # Verify json method returns correct value
         assert json_output == expected_json
-        mock_block_instance.json.assert_called_once()
 
     @patch("nanowallet.libs.block.AccountHelper.get_public_key")
     @patch("nanowallet.libs.block.Block")
