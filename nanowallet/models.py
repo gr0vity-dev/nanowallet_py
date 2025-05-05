@@ -1,7 +1,7 @@
 # nanowallet/models.py
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from .utils.conversion import _raw_to_nano
 from .libs.account_helper import AccountHelper
@@ -168,3 +168,26 @@ class Transaction:
         """The block sending funds"""
         if self.subtype == "receive":
             return self.link
+
+
+@dataclass
+class UnsignedBlockDetails:
+    """Contains all fields for a block before signing and work generation.
+    Includes the hash to be signed and the hash needed for work generation.
+    This object is returned by prepare_* and passed back into submit_*."""
+
+    # Core block fields
+    account: str
+    previous: str
+    representative: str
+    balance_raw: int  # The final balance AFTER the operation
+    link: str
+
+    # Hashes calculated during preparation
+    hash_to_sign: (
+        str  # The actual block hash (hash of all fields above) - user signs this
+    )
+    hash_for_work: str  # The hash requiring PoW (work_block_hash) - library uses this
+
+    # Optional context field (read-only for user)
+    link_as_account: Optional[str] = None  # For send blocks, the destination account ID

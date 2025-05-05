@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, List
+from typing import Protocol, Optional, List, Dict, Any
 from decimal import Decimal
 from ..models import (
     WalletBalance,
@@ -7,6 +7,7 @@ from ..models import (
     Transaction,
     ReceivedBlock,
     RefundDetail,
+    UnsignedBlockDetails,
 )
 from ..utils import NanoResult
 
@@ -29,6 +30,21 @@ class IReadOnlyWallet(Protocol):
     async def account_history(
         self, count: Optional[int] = -1, head: Optional[str] = None
     ) -> NanoResult[List[Transaction]]: ...
+
+    # --- New Methods for Simplified 2-Phase Blocks ---
+    async def prepare_send_block(
+        self, destination_account: str, amount_raw: int
+    ) -> NanoResult[UnsignedBlockDetails]: ...
+    async def prepare_receive_block(
+        self, source_hash: str
+    ) -> NanoResult[UnsignedBlockDetails]: ...
+    async def submit_signed_block(
+        self,
+        unsigned_details: UnsignedBlockDetails,  # Pass back the prepared data
+        signature: str,  # Pass the signature
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> NanoResult[str]: ...
 
 
 class IAuthenticatedWallet(IReadOnlyWallet, Protocol):

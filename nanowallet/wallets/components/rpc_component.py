@@ -81,6 +81,7 @@ class RpcComponent:
     async def process_block(self, block_json: Dict[str, Any]) -> str:
         """Submits a block JSON to the network via RPC."""
         logger.debug("RpcComponent: Processing block JSON via RPC")
+
         response = await self.rpc.process(block_json)
         try_raise_error(response)  # Raise if RPC reported an error
         if "hash" not in response:

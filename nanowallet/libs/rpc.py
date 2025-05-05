@@ -195,7 +195,7 @@ class NanoWalletRpc(INanoRpc):
             Dict containing process result
         """
         logger.debug("Processing block: %s", block)
-        response = await self._rpc.process(block)
+        response = await self._rpc.process(block, json_block=True)
         try_raise_error(response)
         return self._ensure_dict_response(response)
 

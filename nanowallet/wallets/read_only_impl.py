@@ -1,14 +1,27 @@
 import logging
 from typing import Optional, List
 from ..libs.rpc import INanoRpc
-from ..models import WalletConfig, WalletBalance, AccountInfo, Receivable, Transaction
+from ..models import (
+    WalletConfig,
+    WalletBalance,
+    AccountInfo,
+    Receivable,
+    Transaction,
+    UnsignedBlockDetails,
+)
 from ..utils.conversion import _raw_to_nano
-from ..utils.decorators import handle_errors
-from ..errors import InvalidAccountError
+from ..utils.decorators import handle_errors, reload_after
+from ..errors import InvalidAccountError, NanoException
 from ..libs.account_helper import AccountHelper
 
 from .protocols import IReadOnlyWallet
-from .components import RpcComponent, StateManager, QueryOperations
+from .components import (
+    RpcComponent,
+    StateManager,
+    QueryOperations,
+    BlockPreparationComponent,
+    BlockSubmissionComponent,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -47,7 +60,20 @@ class NanoWalletReadOnly(IReadOnlyWallet):
             state_manager=self._state_manager,
         )
 
-        logger.info("Initialized NanoWalletReadOnly for account: %s", self.account)
+        # Instantiate new components
+        self._block_preparation = BlockPreparationComponent(
+            account=self.account,
+            config=self.config,
+            rpc_component=self._rpc_component,
+        )
+        self._block_submission = BlockSubmissionComponent(
+            rpc_component=self._rpc_component, config=self.config
+        )
+
+        logger.info(
+            "Initialized NanoWalletReadOnly for account: %s with preparation/submission components.",
+            self.account,
+        )
 
     # Delegate Methods to Components
 
@@ -90,6 +116,61 @@ class NanoWalletReadOnly(IReadOnlyWallet):
         return await self._query_operations.list_receivables(
             threshold_raw=threshold_raw
         )
+
+    # --- Implement New Methods ---
+    @handle_errors
+    async def prepare_send_block(
+        self, destination_account: str, amount_raw: int | str
+    ) -> UnsignedBlockDetails:
+        """Prepares unsigned block details for a send operation."""
+        logger.info(
+            "NanoWalletReadOnly: Preparing send block to %s for %d raw",
+            destination_account,
+            amount_raw,
+        )
+        amount_raw = int(amount_raw)
+        return await self._block_preparation.prepare_send(
+            destination_account=destination_account, amount_raw=amount_raw
+        )
+
+    @handle_errors
+    async def prepare_receive_block(self, source_hash: str) -> UnsignedBlockDetails:
+        """Prepares unsigned block details for a receive operation."""
+        logger.info(
+            "NanoWalletReadOnly: Preparing receive block for source %s", source_hash
+        )
+        return await self._block_preparation.prepare_receive(source_hash=source_hash)
+
+    # reload_after handles state refresh on success
+    @reload_after
+    @handle_errors
+    async def submit_signed_block(
+        self,
+        unsigned_details: UnsignedBlockDetails,
+        signature: str,
+        wait_confirmation: bool = False,
+        timeout: int = 30,
+    ) -> str:
+        """Submits a block using prepared details and an external signature."""
+        logger.info(
+            "NanoWalletReadOnly: Submitting signed block based on prepared details (hash_to_sign: %s)",
+            unsigned_details.hash_to_sign,
+        )
+        # Validation (optional but recommended)
+        if not signature or len(signature) != 128:
+            raise NanoException("Invalid signature provided.", "INVALID_SIGNATURE")
+        if not isinstance(unsigned_details, UnsignedBlockDetails):
+            raise NanoException("Invalid unsigned_details provided.", "INVALID_INPUT")
+
+        block_hash = await self._block_submission.submit(
+            unsigned_details=unsigned_details,
+            signature=signature,
+            wait_confirmation=wait_confirmation,
+            timeout=timeout,
+        )
+        logger.info("NanoWalletReadOnly: Submitted block hash %s", block_hash)
+        # reload_after decorator handles the state reload
+        return block_hash
 
     def to_string(self) -> str:
         """
