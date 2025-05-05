@@ -5,10 +5,20 @@ from ..errors import InvalidSeedError, InvalidIndexError, InvalidPrivateKeyError
 from ..libs.rpc import INanoRpc
 from .protocols import IAuthenticatedWallet
 from .authenticated_impl import NanoWalletAuthenticated
+from .read_only_impl import NanoWalletReadOnly
 
 # Constants
 SEED_LENGTH = 64  # Length of hex seed
 MAX_INDEX = 4294967295  # Maximum index value (2^32 - 1)
+
+
+def create_wallet_from_account(
+    rpc: INanoRpc, account: str, config: Optional[WalletConfig] = None
+) -> IAuthenticatedWallet:
+    """
+    Creates an authenticated wallet instance from an account address.
+    """
+    return NanoWalletReadOnly(rpc=rpc, account=account, config=config)
 
 
 def create_wallet_from_seed(
