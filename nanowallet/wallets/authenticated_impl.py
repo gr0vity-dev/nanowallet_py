@@ -297,10 +297,11 @@ class NanoWalletAuthenticated(IAuthenticatedWallet, IReadOnlyWallet):
         if errors_encountered:
             # TODO, add warnings instead of raising exceptions when len(processed_blocks) > 0:
             raise NanoException(
-                f"""NanoWalletAuthenticated: receive_all finished with
-{len(processed_blocks)} blocks processed.
-{len(errors_encountered)} errors :
-{"\n".join(errors_encountered)}""",
+                "NanoWalletAuthenticated: receive_all finished with {} blocks processed. {} errors : {}".format(
+                    len(processed_blocks),
+                    len(errors_encountered),
+                    "\n".join(errors_encountered),
+                ),
                 "RECEIVE_ALL_ERROR",
             )
 
