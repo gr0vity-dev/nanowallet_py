@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nanowallet"
-version = "0.1.6"
+version = "0.1.7"
 description = "async nano library for easy account management"
 readme = "README.md"
 authors = [
