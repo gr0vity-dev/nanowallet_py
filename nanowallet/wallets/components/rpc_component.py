@@ -5,8 +5,6 @@ from nanowallet.libs.rpc import INanoRpc
 from nanowallet.errors import (
     BlockNotFoundError,
     try_raise_error,
-    account_not_found,
-    no_error,
     NanoException,
 )
 

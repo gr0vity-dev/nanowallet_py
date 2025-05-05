@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from .rpc_component import RpcComponent
 from .state_manager import StateManager

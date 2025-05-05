@@ -1,7 +1,7 @@
 import asyncio
 import time
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from decimal import Decimal
 
 from .rpc_component import RpcComponent
@@ -10,10 +10,7 @@ from ...libs.block import NanoWalletBlock
 from ...libs.account_helper import AccountHelper
 from ...models import (
     WalletConfig,
-    Receivable,
     ReceivedBlock,
-    RefundDetail,
-    RefundStatus,
 )
 from ...errors import (
     BlockNotFoundError,
