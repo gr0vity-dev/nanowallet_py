@@ -246,10 +246,12 @@ class NanoWalletRpc(INanoRpc):
         Returns:
             Dict containing account history
         """
-        logger.debug("Fetching history for %s", account)
-        response = await self._rpc.account_history(
+        logger.debug("Fetching history for %s with count=%s", account, count)
+        # In nanorpc v0.28.0+, 'count' is a required positional argument
+        effective_count = count if count is not None else -1
+        response = await self._rpc.rpc.account_history(
             account,
-            count=count,
+            effective_count,
             raw=raw,
             head=head,
         )

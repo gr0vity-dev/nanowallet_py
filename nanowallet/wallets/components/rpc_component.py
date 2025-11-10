@@ -100,8 +100,10 @@ class RpcComponent:
             count,
             head,
         )
+        # Pass account and count as keyword arguments to maintain compatibility
+        # The rpc layer will handle converting to positional for nanorpc v0.28.0+
         response = await self.rpc.account_history(
-            account=account, count=count, raw=raw, head=head
+            account, count=count, raw=raw, head=head
         )
         # Caller should check response for errors/not_found
         return response
